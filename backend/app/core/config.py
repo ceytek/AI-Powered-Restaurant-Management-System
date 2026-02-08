@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/restaurant_db"
-    DATABASE_URL_SYNC: str = "postgresql://postgres:postgres@localhost:5432/restaurant_db"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5433/restaurant_db"
+    DATABASE_URL_SYNC: str = "postgresql://postgres:postgres@localhost:5433/restaurant_db"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
