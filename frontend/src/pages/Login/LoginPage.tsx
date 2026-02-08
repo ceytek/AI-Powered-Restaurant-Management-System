@@ -6,12 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Loader2, UtensilsCrossed, Building2, Mail, Lock } from 'lucide-react';
+import { Loader2, UtensilsCrossed, Building2, Mail, Lock, AlertCircle } from 'lucide-react';
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuthStore();
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     company_code: '',
     email: '',
@@ -21,20 +22,28 @@ export function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setError(null);
 
     try {
       await login(formData.company_code, formData.email, formData.password);
       toast.success('Login successful! Welcome back.');
       navigate('/dashboard', { replace: true });
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { detail?: string | Array<{msg: string}> } } };
+    } catch (err: unknown) {
       let message = 'Login failed. Please check your credentials.';
-      const detail = err.response?.data?.detail;
-      if (typeof detail === 'string') {
-        message = detail;
-      } else if (Array.isArray(detail) && detail.length > 0) {
-        message = detail.map((d) => d.msg).join(', ');
+      try {
+        const axiosErr = err as { response?: { data?: { detail?: unknown } } };
+        const detail = axiosErr?.response?.data?.detail;
+        if (typeof detail === 'string') {
+          message = detail;
+        } else if (Array.isArray(detail) && detail.length > 0) {
+          message = detail
+            .map((d: { msg?: string }) => (typeof d?.msg === 'string' ? d.msg : JSON.stringify(d)))
+            .join(', ');
+        }
+      } catch {
+        // If error parsing fails, use default message
       }
+      setError(message);
       toast.error(message);
     } finally {
       setIsLoading(false);
@@ -46,6 +55,8 @@ export function LoginPage() {
       ...prev,
       [e.target.name]: e.target.value,
     }));
+    // Clear error when user starts typing
+    if (error) setError(null);
   };
 
   return (
@@ -93,6 +104,14 @@ export function LoginPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-5">
+              {/* Inline Error Message */}
+              {error && (
+                <div className="flex items-center gap-2 p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
               {/* Company Code */}
               <div className="space-y-2">
                 <Label htmlFor="company_code" className="text-sm font-medium">
