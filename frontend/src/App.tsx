@@ -4,6 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/sonner';
 import { LoginPage } from '@/pages/Login/LoginPage';
 import { DashboardPage } from '@/pages/Dashboard/DashboardPage';
+import { TablesPage } from '@/pages/Tables/TablesPage';
+import { ReservationsPage } from '@/pages/Reservations/ReservationsPage';
+import { MenuPage } from '@/pages/Menu/MenuPage';
+import { CustomersPage } from '@/pages/Customers/CustomersPage';
+import { InventoryPage } from '@/pages/Inventory/InventoryPage';
+import { StaffPage } from '@/pages/Staff/StaffPage';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { useAuthStore } from '@/store/authStore';
@@ -34,14 +40,14 @@ function AppRoutes() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/reservations" element={<ReservationsPage />} />
+          <Route path="/tables" element={<TablesPage />} />
+          <Route path="/menu" element={<MenuPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/staff" element={<StaffPage />} />
+          <Route path="/customers" element={<CustomersPage />} />
 
           {/* Placeholder routes - will be implemented in later phases */}
-          <Route path="/reservations" element={<PlaceholderPage title="Reservations" />} />
-          <Route path="/tables" element={<PlaceholderPage title="Tables" />} />
-          <Route path="/menu" element={<PlaceholderPage title="Menu" />} />
-          <Route path="/inventory" element={<PlaceholderPage title="Inventory" />} />
-          <Route path="/staff" element={<PlaceholderPage title="Staff" />} />
-          <Route path="/customers" element={<PlaceholderPage title="Customers" />} />
           <Route path="/voice-simulator" element={<PlaceholderPage title="Voice Agent Simulator" />} />
           <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
         </Route>
