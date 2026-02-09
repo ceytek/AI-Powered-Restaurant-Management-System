@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -181,7 +181,10 @@ export function ReservationsPage() {
         if (!open) { setSelectedCustomer(null); }
       }}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>New Reservation</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>New Reservation</DialogTitle>
+            <DialogDescription>Fill in the details below to create a new reservation.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto">
             {/* Customer Search */}
             <div className="space-y-2">
@@ -277,8 +280,11 @@ export function ReservationsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button onClick={() => createMutation.mutate()} disabled={!form.customer_name || !form.date || createMutation.isPending}>
-              {createMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
-              Create Reservation
+              {createMutation.isPending ? (
+                <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Creating...</>
+              ) : (
+                'Create Reservation'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

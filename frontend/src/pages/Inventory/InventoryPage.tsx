@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -252,7 +252,7 @@ export function InventoryPage() {
       {/* Create Item Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Add Inventory Item</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Add Inventory Item</DialogTitle><DialogDescription>Add a new item to your inventory.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto">
             <div className="space-y-2">
               <Label>Name *</Label>
@@ -311,7 +311,7 @@ export function InventoryPage() {
       {/* Stock Movement Dialog */}
       <Dialog open={showMovement} onOpenChange={setShowMovement}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Record Stock Movement</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Record Stock Movement</DialogTitle><DialogDescription>Log a stock change for an inventory item.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Item *</Label>
@@ -365,7 +365,7 @@ export function InventoryPage() {
       {/* Create Category Dialog */}
       <Dialog open={showCreateCategory} onOpenChange={setShowCreateCategory}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Add Inventory Category</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Add Inventory Category</DialogTitle><DialogDescription>Create a new inventory category.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Name *</Label>

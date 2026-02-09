@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -191,7 +191,7 @@ export function TablesPage() {
       {/* Create Table Dialog */}
       <Dialog open={showCreateTable} onOpenChange={setShowCreateTable}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Add New Table</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Add New Table</DialogTitle><DialogDescription>Configure a new table for your restaurant.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -246,7 +246,7 @@ export function TablesPage() {
       {/* Create Section Dialog */}
       <Dialog open={showCreateSection} onOpenChange={setShowCreateSection}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Add New Section</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Add New Section</DialogTitle><DialogDescription>Create a new area or section in your restaurant.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Section Name *</Label>

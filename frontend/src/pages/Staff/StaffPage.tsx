@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -242,7 +242,7 @@ export function StaffPage() {
       {/* Create Position Dialog */}
       <Dialog open={showCreatePosition} onOpenChange={setShowCreatePosition}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Add Position</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Add Position</DialogTitle><DialogDescription>Create a new staff position.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Position Name *</Label>
@@ -287,7 +287,7 @@ export function StaffPage() {
       {/* Create Shift Dialog */}
       <Dialog open={showCreateShift} onOpenChange={setShowCreateShift}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Add Shift</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Add Shift</DialogTitle><DialogDescription>Define a new work shift.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Shift Name *</Label>

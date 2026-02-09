@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -147,7 +147,7 @@ export function MenuPage() {
       {/* Create Item Dialog */}
       <Dialog open={showCreateItem} onOpenChange={setShowCreateItem}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Add Menu Item</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Add Menu Item</DialogTitle><DialogDescription>Add a new item to your menu.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto">
             <div className="space-y-2">
               <Label>Name *</Label>
@@ -216,7 +216,7 @@ export function MenuPage() {
       {/* Create Category Dialog */}
       <Dialog open={showCreateCategory} onOpenChange={setShowCreateCategory}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Add Category</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Add Category</DialogTitle><DialogDescription>Create a new menu category.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>Name *</Label>
