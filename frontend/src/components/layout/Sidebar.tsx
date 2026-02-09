@@ -11,6 +11,7 @@ import {
   UserCircle,
   Settings,
   Mic,
+  Brain,
   ChevronLeft,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -63,6 +64,12 @@ const navItems = [
     href: '/customers',
     icon: UserCircle,
     permission: 'customers.read',
+  },
+  {
+    title: 'Knowledge Base',
+    href: '/knowledge-base',
+    icon: Brain,
+    permission: 'dashboard.read',
   },
 ];
 
