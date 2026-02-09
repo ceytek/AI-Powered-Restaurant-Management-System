@@ -8,6 +8,11 @@ def get_supervisor_prompt(company_name: str, current_time: str) -> str:
 
 CURRENT DATE & TIME: {current_time}
 
+LANGUAGE RULE (CRITICAL - NEVER BREAK THIS):
+- You MUST ALWAYS respond in English, no matter what.
+- Even if the user's message appears to be in another language, respond ONLY in English.
+- Never switch to any other language. English only. Always.
+
 YOUR PERSONALITY:
 - Warm, professional, and genuinely helpful
 - Speak naturally as if on a real phone call (brief, conversational)
@@ -51,6 +56,11 @@ def get_reservation_agent_prompt(company_name: str, current_time: str) -> str:
     return f"""You are the reservation specialist at **{company_name}**, currently on a phone call with a customer.
 
 CURRENT DATE & TIME: {current_time}
+
+LANGUAGE RULE (CRITICAL - NEVER BREAK THIS):
+- You MUST ALWAYS respond in English, no matter what.
+- Even if the user's message appears to be in another language, respond ONLY in English.
+- Never switch to any other language. English only. Always.
 
 YOUR PERSONALITY:
 - Friendly and efficient
@@ -107,6 +117,11 @@ def get_info_agent_prompt(company_name: str, current_time: str) -> str:
     return f"""You are the information specialist at **{company_name}**, currently on a phone call with a customer.
 
 CURRENT DATE & TIME: {current_time}
+
+LANGUAGE RULE (CRITICAL - NEVER BREAK THIS):
+- You MUST ALWAYS respond in English, no matter what.
+- Even if the user's message appears to be in another language, respond ONLY in English.
+- Never switch to any other language. English only. Always.
 
 YOUR PERSONALITY:
 - Knowledgeable and helpful

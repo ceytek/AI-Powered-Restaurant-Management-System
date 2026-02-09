@@ -41,6 +41,22 @@ export interface MessageInfo {
   timestamp: string | null;
 }
 
+export interface TranscribeResponse {
+  text: string;
+  language: string;
+  duration_ms: number;
+}
+
+export interface VoiceChatResponse {
+  text_response: string;
+  session_id: string;
+  tools_used: string[];
+  latency_ms: number;
+  call_active: boolean;
+  transcribed_text: string;
+  audio_url: string | null;
+}
+
 export const aiService = {
   /** Start a new phone call simulation */
   startCall: async (companyId: string, customerPhone?: string): Promise<ChatResponse> => {
@@ -50,10 +66,53 @@ export const aiService = {
     return data;
   },
 
-  /** Send a message in the conversation */
+  /** Send a text message in the conversation */
   sendMessage: async (companyId: string, request: ChatRequest): Promise<ChatResponse> => {
     const { data } = await aiApi.post<ChatResponse>('/chat', request, {
       params: { company_id: companyId },
+    });
+    return data;
+  },
+
+  /** Transcribe audio to text */
+  transcribe: async (audioBlob: Blob, filename = 'recording.webm'): Promise<TranscribeResponse> => {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, filename);
+    const { data } = await aiApi.post<TranscribeResponse>('/voice/transcribe', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params: { language: 'en' },
+    });
+    return data;
+  },
+
+  /** Synthesize text to speech - returns audio blob */
+  synthesize: async (text: string, voice?: string, speed?: number): Promise<Blob> => {
+    const { data } = await aiApi.post('/voice/synthesize', { text, voice, speed }, {
+      responseType: 'blob',
+    });
+    return data;
+  },
+
+  /** Full voice pipeline: audio → transcribe → AI → text response */
+  voiceChat: async (
+    audioBlob: Blob,
+    companyId: string,
+    sessionId?: string,
+    customerPhone?: string,
+  ): Promise<VoiceChatResponse> => {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'recording.webm');
+
+    const params: Record<string, string> = {
+      company_id: companyId,
+      language: 'en',  // Force English transcription
+    };
+    if (sessionId) params.session_id = sessionId;
+    if (customerPhone) params.customer_phone = customerPhone;
+
+    const { data } = await aiApi.post<VoiceChatResponse>('/voice/chat', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params,
     });
     return data;
   },
