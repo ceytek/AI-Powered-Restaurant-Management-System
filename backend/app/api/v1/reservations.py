@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.middleware.auth import get_current_user, require_permissions, CurrentUser
 from app.models.reservation import Reservation, ReservationStatusHistory, Waitlist
 from app.models.restaurant import Table
+from app.models.customer import Customer
 from app.schemas.reservation import (
     ReservationCreate, ReservationUpdate, ReservationStatusUpdate, ReservationResponse, ReservationBriefResponse,
     WaitlistCreate, WaitlistStatusUpdate, WaitlistResponse,
@@ -156,10 +157,71 @@ async def create_reservation(
             break
         reservation_number = generate_reservation_number()
 
+    # ── Auto-link or create Customer ──────────────────────────────
+    customer_id = None
+    customer = None
+
+    # 1) Try to find existing customer by phone (primary match)
+    if data.customer_phone:
+        cust_q = await db.execute(
+            select(Customer).where(
+                Customer.company_id == current_user.company_id,
+                Customer.phone == data.customer_phone,
+                Customer.is_active == True,
+            )
+        )
+        customer = cust_q.scalar_one_or_none()
+
+    # 2) If not found by phone, try email
+    if not customer and data.customer_email:
+        cust_q = await db.execute(
+            select(Customer).where(
+                Customer.company_id == current_user.company_id,
+                Customer.email == data.customer_email,
+                Customer.is_active == True,
+            )
+        )
+        customer = cust_q.scalar_one_or_none()
+
+    # 3) If still not found, create a new customer automatically
+    if not customer:
+        # Split customer_name into first/last
+        name_parts = data.customer_name.strip().split(" ", 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else None
+
+        customer = Customer(
+            company_id=current_user.company_id,
+            first_name=first_name,
+            last_name=last_name,
+            email=data.customer_email,
+            phone=data.customer_phone,
+            source="reservation",
+            source_details=f"Auto-created from reservation",
+            created_by=current_user.id,
+        )
+        db.add(customer)
+        await db.flush()
+
+        # Audit the auto-created customer
+        audit_cust = AuditService(db, current_user.company_id, current_user.id)
+        await audit_cust.log_create(
+            "customer", customer.id,
+            {"first_name": first_name, "last_name": last_name, "phone": data.customer_phone, "email": data.customer_email},
+            entity_name=data.customer_name, request=request,
+        )
+
+    customer_id = customer.id
+
+    # Update customer visit count (increment for new reservation)
+    # This will be properly updated when reservation status changes to 'completed'
+
+    # ── Build reservation ──────────────────────────────────────
     reservation_data = data.model_dump()
     reservation_data["company_id"] = current_user.company_id
     reservation_data["reservation_number"] = reservation_number
     reservation_data["created_by"] = current_user.id
+    reservation_data["customer_id"] = customer_id
 
     reservation = Reservation(**reservation_data)
     db.add(reservation)
