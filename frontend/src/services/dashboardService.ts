@@ -1,5 +1,14 @@
 import api from './api';
 
+export interface StaffScheduleItem {
+  name: string;
+  position: string;
+  department: string;
+  shift: string;
+  shift_time: string;
+  status: string;
+}
+
 export interface DashboardSummary {
   tables: {
     total: number;
@@ -22,6 +31,13 @@ export interface DashboardSummary {
   };
   inventory: {
     low_stock_alerts: number;
+  };
+  staff: {
+    total_active: number;
+    on_leave: number;
+    today_scheduled: number;
+    departments: Record<string, number>;
+    today_staff: StaffScheduleItem[];
   };
 }
 

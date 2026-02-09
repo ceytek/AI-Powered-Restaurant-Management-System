@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from datetime import date, datetime, timezone
 
 from app.core.database import get_db
@@ -11,6 +12,8 @@ from app.models.reservation import Reservation
 from app.models.menu import MenuItem
 from app.models.customer import Customer
 from app.models.inventory import InventoryItem
+from app.models.staff import StaffProfile, StaffPosition, StaffSchedule, Shift
+from app.models.core import User
 
 router = APIRouter()
 
@@ -80,6 +83,66 @@ async def get_dashboard_summary(
         )
     )).scalar() or 0
 
+    # ==================== Staff Stats ====================
+    total_staff = (await db.execute(
+        select(func.count()).select_from(StaffProfile).where(
+            StaffProfile.company_id == cid, StaffProfile.employment_status == "active"
+        )
+    )).scalar() or 0
+
+    on_leave_staff = (await db.execute(
+        select(func.count()).select_from(StaffProfile).where(
+            StaffProfile.company_id == cid, StaffProfile.employment_status == "on_leave"
+        )
+    )).scalar() or 0
+
+    # Today's scheduled staff
+    today_scheduled = (await db.execute(
+        select(func.count()).select_from(StaffSchedule).where(
+            StaffSchedule.company_id == cid,
+            StaffSchedule.date == today,
+            StaffSchedule.status.in_(["scheduled", "confirmed"]),
+        )
+    )).scalar() or 0
+
+    # Department breakdown
+    dept_q = await db.execute(
+        select(StaffPosition.department, func.count(StaffProfile.id))
+        .join(StaffProfile, StaffProfile.position_id == StaffPosition.id)
+        .where(StaffProfile.company_id == cid, StaffProfile.employment_status == "active")
+        .group_by(StaffPosition.department)
+    )
+    departments = {row[0]: row[1] for row in dept_q.all()}
+
+    # Today's schedule with names (for dashboard widget)
+    today_schedule_q = await db.execute(
+        select(StaffSchedule)
+        .where(
+            StaffSchedule.company_id == cid,
+            StaffSchedule.date == today,
+            StaffSchedule.status.in_(["scheduled", "confirmed"]),
+        )
+        .options(
+            selectinload(StaffSchedule.staff).selectinload(StaffProfile.user),
+            selectinload(StaffSchedule.staff).selectinload(StaffProfile.position),
+            selectinload(StaffSchedule.shift),
+        )
+        .order_by(StaffSchedule.staff_id)
+    )
+    today_schedules = today_schedule_q.scalars().all()
+
+    today_staff_list = []
+    for s in today_schedules:
+        if s.staff and s.staff.user and s.shift:
+            today_staff_list.append({
+                "name": f"{s.staff.user.first_name} {s.staff.user.last_name}",
+                "position": s.staff.position.name if s.staff.position else "—",
+                "department": s.staff.position.department if s.staff.position else "—",
+                "shift": s.shift.name,
+                "shift_time": f"{s.shift.start_time.strftime('%H:%M')} - {s.shift.end_time.strftime('%H:%M')}",
+                "status": s.status,
+            })
+
     return {
         "tables": {
             "total": table_total,
@@ -102,5 +165,12 @@ async def get_dashboard_summary(
         },
         "inventory": {
             "low_stock_alerts": low_stock_count,
+        },
+        "staff": {
+            "total_active": total_staff,
+            "on_leave": on_leave_staff,
+            "today_scheduled": today_scheduled,
+            "departments": departments,
+            "today_staff": today_staff_list,
         },
     }
