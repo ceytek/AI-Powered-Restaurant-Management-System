@@ -1,11 +1,11 @@
 """Reservation management API endpoints."""
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 from typing import Optional
 from uuid import UUID
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import math
 import random
 import string
@@ -31,6 +31,55 @@ def generate_reservation_number() -> str:
     today = date.today().strftime("%Y%m%d")
     rand = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"RES-{today}-{rand}"
+
+
+def _add_minutes_to_time(t: time, minutes: int) -> time:
+    """Add minutes to a time object, returning a new time."""
+    dt = datetime.combine(date.today(), t) + timedelta(minutes=minutes)
+    return dt.time()
+
+
+async def check_table_conflict(
+    db: AsyncSession,
+    company_id: UUID,
+    table_id: UUID,
+    reservation_date: date,
+    start_time: time,
+    duration_minutes: int,
+    exclude_reservation_id: Optional[UUID] = None,
+) -> Optional[Reservation]:
+    """
+    Check if a table has a conflicting reservation at the given date/time.
+    Returns the conflicting reservation if found, None otherwise.
+
+    Two reservations conflict if their time ranges overlap:
+      existing_start < new_end AND new_start < existing_end
+    """
+    new_end_time = _add_minutes_to_time(start_time, duration_minutes)
+
+    # Active statuses that actually occupy a table
+    active_statuses = ["pending", "confirmed", "checked_in", "seated"]
+
+    query = select(Reservation).where(
+        Reservation.company_id == company_id,
+        Reservation.table_id == table_id,
+        Reservation.date == reservation_date,
+        Reservation.status.in_(active_statuses),
+    )
+
+    if exclude_reservation_id:
+        query = query.where(Reservation.id != exclude_reservation_id)
+
+    result = await db.execute(query)
+    existing_reservations = result.scalars().all()
+
+    for existing in existing_reservations:
+        existing_end = _add_minutes_to_time(existing.start_time, existing.duration_minutes)
+        # Overlap check: existing_start < new_end AND new_start < existing_end
+        if existing.start_time < new_end_time and start_time < existing_end:
+            return existing
+
+    return None
 
 
 # ==================== Reservations ====================
@@ -143,6 +192,24 @@ async def create_reservation(
             raise HTTPException(status_code=404, detail="Table not found")
         if not table.is_reservable:
             raise HTTPException(status_code=400, detail="This table is not reservable")
+
+        # Check for time conflict on this table
+        start_time_obj = data.start_time if isinstance(data.start_time, time) else datetime.strptime(data.start_time, "%H:%M").time()
+        conflict = await check_table_conflict(
+            db, current_user.company_id, data.table_id,
+            data.date, start_time_obj, data.duration_minutes or 90,
+        )
+        if conflict:
+            conflict_end = _add_minutes_to_time(conflict.start_time, conflict.duration_minutes)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Table {table.table_number} is already reserved on {data.date} "
+                    f"from {conflict.start_time.strftime('%H:%M')} to {conflict_end.strftime('%H:%M')} "
+                    f"({conflict.customer_name}, {conflict.reservation_number}). "
+                    f"Please choose a different table or time."
+                ),
+            )
 
     reservation_number = generate_reservation_number()
     # Ensure unique
@@ -293,8 +360,34 @@ async def update_reservation(
     if reservation.status in ["completed", "cancelled", "no_show"]:
         raise HTTPException(status_code=400, detail="Cannot modify a completed/cancelled reservation")
 
-    old_values = serialize_for_audit(reservation, ["customer_name", "party_size", "date", "start_time", "table_id"])
+    # Check for table conflict if table or time is being changed
     update_data = data.model_dump(exclude_unset=True)
+    check_table = update_data.get("table_id", reservation.table_id)
+    check_date = update_data.get("date", reservation.date)
+    check_time = update_data.get("start_time", reservation.start_time)
+    check_duration = update_data.get("duration_minutes", reservation.duration_minutes)
+
+    if check_table and ("table_id" in update_data or "date" in update_data or "start_time" in update_data or "duration_minutes" in update_data):
+        if isinstance(check_time, str):
+            check_time = datetime.strptime(check_time, "%H:%M").time()
+        conflict = await check_table_conflict(
+            db, current_user.company_id, check_table,
+            check_date, check_time, check_duration or 90,
+            exclude_reservation_id=reservation_id,
+        )
+        if conflict:
+            conflict_end = _add_minutes_to_time(conflict.start_time, conflict.duration_minutes)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Table is already reserved on {check_date} "
+                    f"from {conflict.start_time.strftime('%H:%M')} to {conflict_end.strftime('%H:%M')} "
+                    f"({conflict.customer_name}, {conflict.reservation_number}). "
+                    f"Please choose a different table or time."
+                ),
+            )
+
+    old_values = serialize_for_audit(reservation, ["customer_name", "party_size", "date", "start_time", "table_id"])
     update_data["updated_by"] = current_user.id
     reservation = await repo.update(reservation_id, update_data)
 

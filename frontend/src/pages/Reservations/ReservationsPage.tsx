@@ -91,7 +91,10 @@ export function ReservationsPage() {
       setSelectedCustomer(null);
       toast.success('Reservation created successfully');
     },
-    onError: () => toast.error('Failed to create reservation'),
+    onError: (error: any) => {
+      const message = error?.response?.data?.detail || 'Failed to create reservation';
+      toast.error(message);
+    },
   });
 
   const statusMutation = useMutation({
