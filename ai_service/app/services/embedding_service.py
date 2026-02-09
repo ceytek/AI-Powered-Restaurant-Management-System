@@ -192,12 +192,12 @@ class EmbeddingService:
         result = await db.execute(
             text("""
                 SELECT id, title, content, short_answer, entry_type, priority, extra_data, keywords,
-                       1 - (embedding <=> :embedding::vector) as similarity
+                       1 - (embedding <=> CAST(:embedding AS vector)) as similarity
                 FROM knowledge_entries
                 WHERE company_id = :company_id
                   AND is_active = true
                   AND embedding IS NOT NULL
-                ORDER BY embedding <=> :embedding::vector
+                ORDER BY embedding <=> CAST(:embedding AS vector)
                 LIMIT :limit
             """),
             {
@@ -235,12 +235,12 @@ class EmbeddingService:
             text("""
                 SELECT id, menu_item_id, item_name, item_description, category_name,
                        price, allergens, tags, is_available,
-                       1 - (embedding <=> :embedding::vector) as similarity
+                       1 - (embedding <=> CAST(:embedding AS vector)) as similarity
                 FROM menu_embeddings
                 WHERE company_id = :company_id
                   AND is_available = true
                   AND embedding IS NOT NULL
-                ORDER BY embedding <=> :embedding::vector
+                ORDER BY embedding <=> CAST(:embedding AS vector)
                 LIMIT :limit
             """),
             {

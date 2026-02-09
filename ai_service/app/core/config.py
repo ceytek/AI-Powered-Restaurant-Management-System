@@ -45,7 +45,8 @@ class Settings(BaseSettings):
     EMBEDDING_BATCH_SIZE: int = 50
 
     class Config:
-        env_file = ".env"
+        env_file = "../.env"  # Root .env file
+        extra = "ignore"
         env_file_encoding = "utf-8"
         case_sensitive = True
 

@@ -11,6 +11,7 @@ import { CustomersPage } from '@/pages/Customers/CustomersPage';
 import { InventoryPage } from '@/pages/Inventory/InventoryPage';
 import { StaffPage } from '@/pages/Staff/StaffPage';
 import { KnowledgeBasePage } from '@/pages/KnowledgeBase/KnowledgeBasePage';
+import { VoiceSimulatorPage } from '@/pages/VoiceSimulator/VoiceSimulatorPage';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
 import { useAuthStore } from '@/store/authStore';
@@ -49,8 +50,8 @@ function AppRoutes() {
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
 
-          {/* Placeholder routes - will be implemented in later phases */}
-          <Route path="/voice-simulator" element={<PlaceholderPage title="Voice Agent Simulator" />} />
+          {/* AI Voice Simulator */}
+          <Route path="/voice-simulator" element={<VoiceSimulatorPage />} />
           <Route path="/settings" element={<PlaceholderPage title="Settings" />} />
         </Route>
       </Route>

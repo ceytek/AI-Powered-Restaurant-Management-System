@@ -2,6 +2,7 @@ import axios from 'axios';
 
 const AI_URL = import.meta.env.VITE_AI_URL || '/ai';
 
+// Separate axios instance for AI service (no auth needed for now)
 const aiApi = axios.create({
   baseURL: AI_URL,
   headers: {
@@ -9,136 +10,67 @@ const aiApi = axios.create({
   },
 });
 
-// Add auth token to AI service requests
-aiApi.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// ==================== Types ====================
-
-export interface KnowledgeCategory {
-  id: string;
-  company_id: string;
-  name: string;
-  display_name: string;
-  description?: string;
-  icon?: string;
-  sort_order: number;
-  is_active: boolean;
-  created_at?: string;
+export interface ChatRequest {
+  message: string;
+  session_id?: string;
+  customer_phone?: string;
 }
 
-export interface KnowledgeEntry {
-  id: string;
-  company_id: string;
-  category_id?: string;
-  title: string;
+export interface ChatResponse {
+  response: string;
+  session_id: string;
+  tools_used: string[];
+  latency_ms: number;
+  call_active: boolean;
+}
+
+export interface SessionInfo {
+  session_id: string;
+  started_at: string | null;
+  last_message_at: string | null;
+  message_count: number;
+  customer_phone: string | null;
+}
+
+export interface MessageInfo {
+  role: string;
   content: string;
-  short_answer?: string;
-  keywords: string[];
-  entry_type: string;
-  priority: number;
-  extra_data: Record<string, unknown>;
-  is_active: boolean;
-  has_embedding: boolean;
-  created_at?: string;
-  updated_at?: string;
+  input_type: string | null;
+  tool_name: string | null;
+  latency_ms: number | null;
+  timestamp: string | null;
 }
-
-export interface SearchResult {
-  id: string;
-  source: string;
-  title: string;
-  content: string;
-  score: number;
-  metadata: Record<string, unknown>;
-}
-
-export interface SyncStatus {
-  menu_items_synced: number;
-  knowledge_entries_with_embeddings: number;
-  knowledge_entries_total: number;
-  last_sync?: string;
-}
-
-// ==================== Service ====================
 
 export const aiService = {
-  // Health
-  health: async () => {
-    const { data } = await aiApi.get('/health');
+  /** Start a new phone call simulation */
+  startCall: async (companyId: string, customerPhone?: string): Promise<ChatResponse> => {
+    const params: Record<string, string> = { company_id: companyId };
+    if (customerPhone) params.customer_phone = customerPhone;
+    const { data } = await aiApi.post<ChatResponse>('/chat/start', null, { params });
     return data;
   },
 
-  // Categories
-  getCategories: async (companyId: string) => {
-    const { data } = await aiApi.get<KnowledgeCategory[]>('/knowledge/categories', {
+  /** Send a message in the conversation */
+  sendMessage: async (companyId: string, request: ChatRequest): Promise<ChatResponse> => {
+    const { data } = await aiApi.post<ChatResponse>('/chat', request, {
       params: { company_id: companyId },
     });
     return data;
   },
 
-  createCategory: async (companyId: string, payload: { name: string; display_name: string; description?: string; icon?: string; sort_order?: number }) => {
-    const { data } = await aiApi.post<KnowledgeCategory>(`/knowledge/categories?company_id=${companyId}`, payload);
-    return data;
-  },
-
-  // Entries
-  getEntries: async (companyId: string, params: { category_id?: string; entry_type?: string; search?: string; page?: number; page_size?: number } = {}) => {
-    const { data } = await aiApi.get('/knowledge/entries', {
-      params: { company_id: companyId, ...params },
+  /** List recent sessions */
+  listSessions: async (companyId: string, limit = 20): Promise<SessionInfo[]> => {
+    const { data } = await aiApi.get<SessionInfo[]>('/chat/sessions', {
+      params: { company_id: companyId, limit },
     });
     return data;
   },
 
-  createEntry: async (companyId: string, payload: { title: string; content: string; category_id?: string; short_answer?: string; keywords?: string[]; entry_type?: string; priority?: number; extra_data?: Record<string, unknown> }, autoEmbed = true) => {
-    const { data } = await aiApi.post<KnowledgeEntry>(`/knowledge/entries?company_id=${companyId}&auto_embed=${autoEmbed}`, payload);
-    return data;
-  },
-
-  updateEntry: async (companyId: string, entryId: string, payload: Partial<KnowledgeEntry>, reEmbed = true) => {
-    const { data } = await aiApi.put<KnowledgeEntry>(`/knowledge/entries/${entryId}?company_id=${companyId}&re_embed=${reEmbed}`, payload);
-    return data;
-  },
-
-  deleteEntry: async (companyId: string, entryId: string) => {
-    const { data } = await aiApi.delete(`/knowledge/entries/${entryId}?company_id=${companyId}`);
-    return data;
-  },
-
-  // Search
-  semanticSearch: async (companyId: string, query: string, searchType = 'all', limit = 5) => {
-    const { data } = await aiApi.post<{ query: string; results: SearchResult[]; total: number }>(
-      `/knowledge/search?company_id=${companyId}`,
-      { query, search_type: searchType, limit }
-    );
-    return data;
-  },
-
-  // Sync
-  getSyncStatus: async (companyId: string) => {
-    const { data } = await aiApi.get<SyncStatus>('/knowledge/sync/status', {
+  /** Get session history */
+  getSessionHistory: async (companyId: string, sessionId: string): Promise<MessageInfo[]> => {
+    const { data } = await aiApi.get<MessageInfo[]>(`/chat/sessions/${sessionId}`, {
       params: { company_id: companyId },
     });
-    return data;
-  },
-
-  syncMenuEmbeddings: async (companyId: string) => {
-    const { data } = await aiApi.post(`/knowledge/sync/menu-embeddings?company_id=${companyId}`);
-    return data;
-  },
-
-  syncKnowledgeEmbeddings: async (companyId: string) => {
-    const { data } = await aiApi.post(`/knowledge/sync/knowledge-embeddings?company_id=${companyId}`);
     return data;
   },
 };
-
-export default aiApi;
