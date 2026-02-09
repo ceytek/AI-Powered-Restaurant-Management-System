@@ -8,6 +8,7 @@ import {
   type VoiceChatResponse,
 } from '@/services/aiService';
 import { useAuthStore } from '@/store/authStore';
+import { useVoiceConversation, type ConversationState } from '@/hooks/useVoiceConversation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
 import {
   Phone,
   PhoneOff,
@@ -38,11 +40,15 @@ import {
   Volume2,
   VolumeX,
   PhoneCall,
-  Waves,
   Keyboard,
   AudioLines,
   CircleStop,
   Info,
+  Radio,
+  Hand,
+  Settings2,
+  Ear,
+  Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -58,14 +64,50 @@ interface ChatMessage {
   isVoice?: boolean;
 }
 
-/* ───────────── Audio Waveform ───────────── */
+type InteractionMode = 'live' | 'ptt' | 'text';
+
+/* ───────────── Audio Level Meter ───────────── */
+function AudioLevelMeter({ level, isActive }: { level: number; isActive: boolean }) {
+  const bars = 20;
+  const normalised = Math.min(level * 12, 1); // amplify for visual
+
+  return (
+    <div className="flex items-end gap-[2px] h-8">
+      {Array.from({ length: bars }).map((_, i) => {
+        const threshold = i / bars;
+        const active = isActive && normalised > threshold;
+        return (
+          <div
+            key={i}
+            className={cn(
+              'w-1 rounded-full transition-all duration-75',
+              active
+                ? i / bars > 0.7
+                  ? 'bg-red-400'
+                  : i / bars > 0.4
+                    ? 'bg-amber-400'
+                    : 'bg-emerald-400'
+                : 'bg-muted-foreground/15',
+            )}
+            style={{
+              height: active
+                ? `${Math.max(4, (normalised - threshold) * 60 + 6)}px`
+                : '4px',
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/* ───────────── Live Waveform ───────────── */
 function LiveWaveform({ analyser, isActive }: { analyser: AnalyserNode | null; isActive: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
 
   useEffect(() => {
     if (!analyser || !canvasRef.current || !isActive) return;
-
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -77,20 +119,16 @@ function LiveWaveform({ analyser, isActive }: { analyser: AnalyserNode | null; i
       animFrameRef.current = requestAnimationFrame(draw);
       analyser.getByteTimeDomainData(dataArray);
 
-      ctx.fillStyle = 'rgba(0, 0, 0, 0)';
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       ctx.lineWidth = 2;
       ctx.strokeStyle = '#22c55e';
       ctx.beginPath();
 
       const sliceWidth = canvas.width / bufferLength;
       let x = 0;
-
       for (let i = 0; i < bufferLength; i++) {
         const v = dataArray[i] / 128.0;
         const y = (v * canvas.height) / 2;
-
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
         x += sliceWidth;
@@ -103,14 +141,7 @@ function LiveWaveform({ analyser, isActive }: { analyser: AnalyserNode | null; i
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [analyser, isActive]);
 
-  return (
-    <canvas
-      ref={canvasRef}
-      width={280}
-      height={60}
-      className="w-full max-w-[280px]"
-    />
-  );
+  return <canvas ref={canvasRef} width={280} height={50} className="w-full max-w-[280px]" />;
 }
 
 /* ──────────── Pulsating Rings ──────────── */
@@ -122,7 +153,6 @@ function PulseRings({ color = 'green' }: { color?: string }) {
     blue: 'border-blue-400',
   };
   const borderColor = colorMap[color] || colorMap.green;
-
   return (
     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
       <div className={cn('absolute w-20 h-20 rounded-full border-2 animate-ping opacity-20', borderColor)} />
@@ -130,6 +160,26 @@ function PulseRings({ color = 'green' }: { color?: string }) {
         className={cn('absolute w-28 h-28 rounded-full border animate-ping opacity-10', borderColor)}
         style={{ animationDelay: '0.5s' }}
       />
+    </div>
+  );
+}
+
+/* ──────────── State Status Pill ──────────── */
+function ConversationStatePill({ state }: { state: ConversationState }) {
+  const configs: Record<ConversationState, { label: string; icon: typeof Ear; color: string; pulse?: boolean }> = {
+    IDLE: { label: 'Idle', icon: Phone, color: 'bg-muted text-muted-foreground' },
+    LISTENING: { label: 'Listening...', icon: Ear, color: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300', pulse: true },
+    USER_SPEAKING: { label: 'You\'re speaking', icon: Mic, color: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300', pulse: true },
+    PROCESSING: { label: 'Processing...', icon: Zap, color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300', pulse: true },
+    AGENT_SPEAKING: { label: 'Agent speaking', icon: AudioLines, color: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300', pulse: true },
+  };
+  const c = configs[state];
+  const Icon = c.icon;
+
+  return (
+    <div className={cn('inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-300', c.color)}>
+      <Icon className={cn('h-3.5 w-3.5', c.pulse && 'animate-pulse')} />
+      {c.label}
     </div>
   );
 }
@@ -148,20 +198,23 @@ export function VoiceSimulatorPage() {
   const [callDuration, setCallDuration] = useState(0);
   const [callActive, setCallActive] = useState(true);
 
-  /* ─── Voice Mode ─── */
-  const [voiceMode, setVoiceMode] = useState(true);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false); // agent speaking
+  /* ─── Interaction Mode ─── */
+  const [mode, setMode] = useState<InteractionMode>('live');
   const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [speechThreshold, setSpeechThreshold] = useState(0.015);
+  const [silenceDuration, setSilenceDuration] = useState(1400);
 
-  /* ─── Audio refs ─── */
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  /* ─── Push-to-Talk refs ─── */
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPlayingPTT, setIsPlayingPTT] = useState(false);
+  const [isSpeakingPTT, setIsSpeakingPTT] = useState(false);
+  const pttRecorderRef = useRef<MediaRecorder | null>(null);
+  const pttChunksRef = useRef<Blob[]>([]);
+  const pttStreamRef = useRef<MediaStream | null>(null);
+  const pttAudioCtxRef = useRef<AudioContext | null>(null);
+  const pttAnalyserRef = useRef<AnalyserNode | null>(null);
+  const pttAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   /* ─── History ─── */
   const [showHistory, setShowHistory] = useState(false);
@@ -172,6 +225,54 @@ export function VoiceSimulatorPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const greetingPlayedRef = useRef(false);
+
+  /* ─── Voice Conversation Hook (for "Live" mode) ─── */
+  const voiceConv = useVoiceConversation(
+    {
+      companyId,
+      sessionId,
+      ttsEnabled,
+      speechThreshold,
+      silenceDurationMs: silenceDuration,
+      minSpeechMs: 400,
+    },
+    {
+      onSessionId: (id) => setSessionId(id),
+      onUserMessage: (text) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg-user-${Date.now()}`,
+            role: 'user',
+            content: text,
+            timestamp: new Date(),
+            isVoice: true,
+          },
+        ]);
+      },
+      onAgentMessage: (text, latencyMs, toolsUsed) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg-ai-${Date.now()}`,
+            role: 'assistant',
+            content: text,
+            timestamp: new Date(),
+            latency_ms: latencyMs,
+            tools_used: toolsUsed,
+          },
+        ]);
+      },
+      onCallActive: (active) => {
+        setCallActive(active);
+        if (!active) {
+          setTimeout(() => handleEndCall(), 2500);
+        }
+      },
+      onError: (msg) => toast.error(msg),
+    },
+  );
 
   /* ─── Auto-scroll ─── */
   useEffect(() => {
@@ -191,8 +292,8 @@ export function VoiceSimulatorPage() {
   /* ─── Cleanup on unmount ─── */
   useEffect(() => {
     return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      audioContextRef.current?.close();
+      pttStreamRef.current?.getTracks().forEach((t) => t.stop());
+      pttAudioCtxRef.current?.close();
     };
   }, []);
 
@@ -211,6 +312,8 @@ export function VoiceSimulatorPage() {
       setIsRinging(false);
       setSessionId(data.session_id);
       setCallActive(data.call_active);
+      greetingPlayedRef.current = false;
+
       const msg: ChatMessage = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
@@ -221,12 +324,15 @@ export function VoiceSimulatorPage() {
       };
       setMessages([msg]);
 
-      // Speak the greeting
+      // Play greeting TTS, then start continuous listening if in live mode
       if (ttsEnabled) {
-        await playTTS(data.response);
+        await playGreetingTTS(data.response);
+      } else if (mode === 'live') {
+        // No TTS → start listening immediately
+        voiceConv.startListening();
       }
 
-      if (!voiceMode) {
+      if (mode === 'text') {
         setTimeout(() => inputRef.current?.focus(), 100);
       }
     },
@@ -252,20 +358,58 @@ export function VoiceSimulatorPage() {
         tools_used: data.tools_used,
       };
       setMessages((prev) => [...prev, msg]);
-      if (ttsEnabled) await playTTS(data.response);
+
+      if (ttsEnabled) {
+        if (mode === 'live') {
+          // In live mode: play TTS through a temp audio, then resume listening
+          try {
+            const blob = await aiService.synthesize(data.response);
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audio.onended = () => {
+              URL.revokeObjectURL(url);
+              if (!data.call_active) {
+                handleEndCall();
+              } else {
+                voiceConv.startListening();
+              }
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(url);
+              if (!data.call_active) handleEndCall();
+              else voiceConv.startListening();
+            };
+            await audio.play();
+          } catch {
+            if (!data.call_active) handleEndCall();
+            else voiceConv.startListening();
+          }
+          return;
+        } else if (mode === 'ptt') {
+          await playPttTTS(data.response);
+        }
+      } else if (mode === 'live') {
+        // No TTS → resume listening immediately
+        if (!data.call_active) {
+          setTimeout(() => handleEndCall(), 2500);
+        } else {
+          voiceConv.startListening();
+        }
+        return;
+      }
+
       if (!data.call_active) setTimeout(() => handleEndCall(), 2500);
     },
     onError: () => toast.error('Failed to send message'),
   });
 
-  // Voice chat (send audio)
+  // Voice chat (PTT mode)
   const voiceChatMutation = useMutation({
     mutationFn: (blob: Blob) => aiService.voiceChat(blob, companyId, sessionId || undefined),
     onSuccess: async (data: VoiceChatResponse) => {
       setSessionId(data.session_id);
       setCallActive(data.call_active);
 
-      // Add user message (transcribed)
       if (data.transcribed_text) {
         setMessages((prev) => [
           ...prev,
@@ -279,7 +423,6 @@ export function VoiceSimulatorPage() {
         ]);
       }
 
-      // Add assistant message
       const msg: ChatMessage = {
         id: `msg-ai-${Date.now()}`,
         role: 'assistant',
@@ -290,7 +433,7 @@ export function VoiceSimulatorPage() {
       };
       setMessages((prev) => [...prev, msg]);
 
-      if (ttsEnabled) await playTTS(data.text_response);
+      if (ttsEnabled) await playPttTTS(data.text_response);
       if (!data.call_active) setTimeout(() => handleEndCall(), 2500);
     },
     onError: () => {
@@ -306,101 +449,124 @@ export function VoiceSimulatorPage() {
     enabled: showHistory && !!companyId,
   });
 
-  /* ────────────────── TTS Playback ────────────────── */
-  const playTTS = async (text: string) => {
+  /* ────────────────── Greeting TTS ────────────────── */
+  const playGreetingTTS = async (text: string) => {
     try {
-      setIsSpeaking(true);
       const blob = await aiService.synthesize(text);
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
-      audioPlayerRef.current = audio;
 
       audio.onended = () => {
-        setIsSpeaking(false);
-        setIsPlaying(false);
+        URL.revokeObjectURL(url);
+        greetingPlayedRef.current = true;
+        // After greeting → start continuous listening in live mode
+        if (mode === 'live') {
+          voiceConv.startListening();
+        }
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        greetingPlayedRef.current = true;
+        if (mode === 'live') {
+          voiceConv.startListening();
+        }
+      };
+
+      await audio.play();
+    } catch (e) {
+      console.error('Greeting TTS error:', e);
+      greetingPlayedRef.current = true;
+      if (mode === 'live') {
+        voiceConv.startListening();
+      }
+    }
+  };
+
+  /* ────────────────── PTT TTS Playback ────────────────── */
+  const playPttTTS = async (text: string) => {
+    try {
+      setIsSpeakingPTT(true);
+      const blob = await aiService.synthesize(text);
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      pttAudioPlayerRef.current = audio;
+
+      audio.onended = () => {
+        setIsSpeakingPTT(false);
+        setIsPlayingPTT(false);
         URL.revokeObjectURL(url);
       };
       audio.onerror = () => {
-        setIsSpeaking(false);
-        setIsPlaying(false);
+        setIsSpeakingPTT(false);
+        setIsPlayingPTT(false);
       };
 
-      setIsPlaying(true);
+      setIsPlayingPTT(true);
       await audio.play();
     } catch (e) {
-      console.error('TTS playback error:', e);
-      setIsSpeaking(false);
-      setIsPlaying(false);
+      console.error('PTT TTS error:', e);
+      setIsSpeakingPTT(false);
+      setIsPlayingPTT(false);
     }
   };
 
-  const stopTTS = () => {
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current.currentTime = 0;
+  const stopPttTTS = () => {
+    if (pttAudioPlayerRef.current) {
+      pttAudioPlayerRef.current.pause();
+      pttAudioPlayerRef.current.currentTime = 0;
     }
-    setIsSpeaking(false);
-    setIsPlaying(false);
+    setIsSpeakingPTT(false);
+    setIsPlayingPTT(false);
   };
 
-  /* ────────────────── Microphone Recording ────────────────── */
-  const startRecording = async () => {
+  /* ────────────────── PTT Recording ────────────────── */
+  const startPttRecording = async () => {
     try {
-      // Stop TTS if playing
-      stopTTS();
-
+      stopPttTTS();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      pttStreamRef.current = stream;
 
-      // Set up analyser for waveform
       const audioCtx = new AudioContext();
-      audioContextRef.current = audioCtx;
+      pttAudioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
       source.connect(analyser);
-      analyserRef.current = analyser;
+      pttAnalyserRef.current = analyser;
 
-      // Start recording
-      const mediaRecorder = new MediaRecorder(stream, {
+      const recorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
           ? 'audio/webm;codecs=opus'
           : 'audio/webm',
       });
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
+      pttRecorderRef.current = recorder;
+      pttChunksRef.current = [];
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) pttChunksRef.current.push(e.data);
       };
-
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        // Stop the stream tracks
+      recorder.onstop = () => {
+        const blob = new Blob(pttChunksRef.current, { type: 'audio/webm' });
         stream.getTracks().forEach((t) => t.stop());
         audioCtx.close();
-        analyserRef.current = null;
-
-        if (blob.size > 100) {
-          voiceChatMutation.mutate(blob);
-        }
+        pttAnalyserRef.current = null;
+        if (blob.size > 100) voiceChatMutation.mutate(blob);
       };
 
-      mediaRecorder.start();
+      recorder.start();
       setIsRecording(true);
     } catch (err: any) {
-      console.error('Microphone error:', err);
       if (err.name === 'NotAllowedError') {
-        toast.error('Microphone access denied. Please allow microphone access in browser settings.');
+        toast.error('Microphone access denied');
       } else {
         toast.error('Could not access microphone');
       }
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+  const stopPttRecording = () => {
+    if (pttRecorderRef.current && pttRecorderRef.current.state !== 'inactive') {
+      pttRecorderRef.current.stop();
     }
     setIsRecording(false);
   };
@@ -413,6 +579,7 @@ export function VoiceSimulatorPage() {
     setCallDuration(0);
     setSessionId(null);
     setCallActive(true);
+    greetingPlayedRef.current = false;
     setTimeout(() => startCallMutation.mutate(), 1500);
   }, [companyId]);
 
@@ -420,12 +587,13 @@ export function VoiceSimulatorPage() {
     setIsInCall(false);
     setIsRinging(false);
     setIsRecording(false);
-    stopTTS();
+    stopPttTTS();
+    voiceConv.stopListening();
     if (timerRef.current) clearInterval(timerRef.current);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
+    if (pttStreamRef.current) {
+      pttStreamRef.current.getTracks().forEach((t) => t.stop());
     }
-  }, []);
+  }, [voiceConv]);
 
   const handleSendText = useCallback(() => {
     const text = inputText.trim();
@@ -448,7 +616,46 @@ export function VoiceSimulatorPage() {
     }
   };
 
-  const isPending = sendTextMutation.isPending || voiceChatMutation.isPending || startCallMutation.isPending;
+  const handleQuickPhrase = (phrase: string) => {
+    // In live mode, pause listening while we send text
+    if (mode === 'live' && !voiceConv.isIdle) {
+      voiceConv.stopListening();
+    }
+
+    setMessages((prev) => [
+      ...prev,
+      { id: `msg-${Date.now()}`, role: 'user', content: phrase, timestamp: new Date() },
+    ]);
+    sendTextMutation.mutate(phrase);
+  };
+
+  const isPending =
+    sendTextMutation.isPending ||
+    voiceChatMutation.isPending ||
+    startCallMutation.isPending ||
+    voiceConv.isProcessing;
+
+  // Determine top bar state label
+  const getTopBarStatus = (): string => {
+    if (isRinging) return 'Ringing...';
+    if (!isInCall) return 'Press Start Call to begin';
+
+    if (mode === 'live') {
+      switch (voiceConv.state) {
+        case 'LISTENING':
+          return 'Live · Listening...';
+        case 'USER_SPEAKING':
+          return 'Live · You\'re speaking';
+        case 'PROCESSING':
+          return 'Live · Processing...';
+        case 'AGENT_SPEAKING':
+          return 'Live · Agent speaking';
+        default:
+          return `Active call · ${formatDuration(callDuration)}`;
+      }
+    }
+    return `Active call · ${formatDuration(callDuration)}`;
+  };
 
   /* ════════════════ RENDER ════════════════ */
   return (
@@ -458,7 +665,7 @@ export function VoiceSimulatorPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Voice Agent Simulator</h1>
           <p className="text-muted-foreground text-sm">
-            Simulate a phone call with the AI restaurant receptionist
+            Simulate a realistic phone call with the AI restaurant receptionist
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -481,15 +688,21 @@ export function VoiceSimulatorPage() {
                 isInCall
                   ? isRinging
                     ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'
-                    : 'bg-gradient-to-r from-emerald-600 to-green-600 text-white'
-                  : 'bg-muted/60'
+                    : voiceConv.isListening
+                      ? 'bg-gradient-to-r from-emerald-600 to-green-600 text-white'
+                      : voiceConv.isUserSpeaking
+                        ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white'
+                        : voiceConv.isAgentSpeaking
+                          ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-white'
+                          : 'bg-gradient-to-r from-emerald-600 to-green-600 text-white'
+                  : 'bg-muted/60',
               )}
             >
               <div className="flex items-center gap-3">
                 <div
                   className={cn(
                     'w-10 h-10 rounded-full flex items-center justify-center transition-colors',
-                    isInCall ? 'bg-white/20' : 'bg-muted-foreground/10'
+                    isInCall ? 'bg-white/20' : 'bg-muted-foreground/10',
                   )}
                 >
                   {isRinging ? (
@@ -508,20 +721,17 @@ export function VoiceSimulatorPage() {
                         ? company?.name || 'Restaurant'
                         : 'Phone Call Simulator'}
                   </p>
-                  <p className="text-xs opacity-75">
-                    {isInCall
-                      ? isRinging
-                        ? 'Ringing...'
-                        : `Active call · ${formatDuration(callDuration)}`
-                      : 'Press Start Call to begin'}
-                  </p>
+                  <p className="text-xs opacity-75">{getTopBarStatus()}</p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
+                {isInCall && !isRinging && mode === 'live' && (
+                  <ConversationStatePill state={voiceConv.state} />
+                )}
                 {isInCall && !isRinging && (
                   <>
-                    {isSpeaking && (
+                    {(isSpeakingPTT || voiceConv.isAgentSpeaking) && mode !== 'live' && (
                       <div className="flex items-center gap-1.5 px-2 py-1 bg-white/15 rounded-full mr-1">
                         <AudioLines className="h-3.5 w-3.5 animate-pulse" />
                         <span className="text-[11px] font-medium">Agent speaking</span>
@@ -568,8 +778,8 @@ export function VoiceSimulatorPage() {
                     </div>
                     <h3 className="text-xl font-semibold mb-2">AI Restaurant Receptionist</h3>
                     <p className="text-muted-foreground max-w-sm mb-8 text-sm leading-relaxed">
-                      Experience a realistic phone call with our AI. Speak or type — the agent can make reservations,
-                      answer menu questions, and handle restaurant inquiries.
+                      Experience a realistic phone call with our AI. In <strong>Live mode</strong>,
+                      just talk naturally — the system automatically detects when you speak and when you pause.
                     </p>
                     <Button
                       size="lg"
@@ -582,9 +792,9 @@ export function VoiceSimulatorPage() {
 
                     <div className="mt-10 grid grid-cols-3 gap-6 max-w-md">
                       {[
-                        { icon: Mic, label: 'Voice Input', desc: 'Speak naturally', color: 'text-rose-500' },
+                        { icon: Radio, label: 'Live Mode', desc: 'Continuous listening', color: 'text-emerald-500' },
                         { icon: Bot, label: 'AI Agent', desc: 'Smart responses', color: 'text-blue-500' },
-                        { icon: Volume2, label: 'Voice Reply', desc: 'Hear the agent', color: 'text-emerald-500' },
+                        { icon: AudioLines, label: 'Auto Turn-Taking', desc: 'Natural flow', color: 'text-amber-500' },
                       ].map((item) => (
                         <div key={item.label} className="text-center">
                           <div className="bg-muted/60 p-3 rounded-xl inline-flex mb-2">
@@ -618,7 +828,7 @@ export function VoiceSimulatorPage() {
                         key={msg.id}
                         className={cn(
                           'flex gap-2.5 animate-in slide-in-from-bottom-2 duration-300',
-                          msg.role === 'user' ? 'justify-end' : 'justify-start'
+                          msg.role === 'user' ? 'justify-end' : 'justify-start',
                         )}
                       >
                         {msg.role === 'assistant' && (
@@ -634,14 +844,14 @@ export function VoiceSimulatorPage() {
                             'max-w-[78%] rounded-2xl px-4 py-2.5 shadow-sm',
                             msg.role === 'user'
                               ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-br-md'
-                              : 'bg-card border rounded-bl-md'
+                              : 'bg-card border rounded-bl-md',
                           )}
                         >
                           <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                           <div
                             className={cn(
                               'flex items-center gap-2 mt-1.5 flex-wrap',
-                              msg.role === 'user' ? 'justify-end' : 'justify-start'
+                              msg.role === 'user' ? 'justify-end' : 'justify-start',
                             )}
                           >
                             {msg.isVoice && (
@@ -651,7 +861,7 @@ export function VoiceSimulatorPage() {
                                   'text-[9px] h-4 px-1',
                                   msg.role === 'user'
                                     ? 'border-white/30 text-white/70'
-                                    : 'border-emerald-300 text-emerald-600'
+                                    : 'border-emerald-300 text-emerald-600',
                                 )}
                               >
                                 <Mic className="h-2 w-2 mr-0.5" />
@@ -661,7 +871,7 @@ export function VoiceSimulatorPage() {
                             <span
                               className={cn(
                                 'text-[10px]',
-                                msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'
+                                msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground',
                               )}
                             >
                               {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -670,7 +880,7 @@ export function VoiceSimulatorPage() {
                               <span
                                 className={cn(
                                   'text-[10px]',
-                                  msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'
+                                  msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground',
                                 )}
                               >
                                 · {msg.latency_ms}ms
@@ -709,21 +919,12 @@ export function VoiceSimulatorPage() {
                         <div className="bg-card border rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
                           <div className="flex items-center gap-2">
                             <div className="flex gap-1">
-                              <div
-                                className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"
-                                style={{ animationDelay: '0ms' }}
-                              />
-                              <div
-                                className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"
-                                style={{ animationDelay: '150ms' }}
-                              />
-                              <div
-                                className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce"
-                                style={{ animationDelay: '300ms' }}
-                              />
+                              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                             </div>
                             <span className="text-[11px] text-muted-foreground ml-1">
-                              {voiceChatMutation.isPending ? 'Processing voice...' : 'Thinking...'}
+                              {voiceConv.isProcessing || voiceChatMutation.isPending ? 'Processing voice...' : 'Thinking...'}
                             </span>
                           </div>
                         </div>
@@ -749,33 +950,57 @@ export function VoiceSimulatorPage() {
                 <div className="border-t bg-muted/30 px-4 py-3">
                   {/* Mode Toggle */}
                   <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-4">
-                      <button
-                        onClick={() => setVoiceMode(true)}
-                        className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
-                          voiceMode
-                            ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'
-                            : 'text-muted-foreground hover:bg-muted'
-                        )}
-                      >
-                        <Mic className="h-3.5 w-3.5" />
-                        Voice
-                      </button>
-                      <button
-                        onClick={() => setVoiceMode(false)}
-                        className={cn(
-                          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
-                          !voiceMode
-                            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
-                            : 'text-muted-foreground hover:bg-muted'
-                        )}
-                      >
-                        <Keyboard className="h-3.5 w-3.5" />
-                        Text
-                      </button>
+                    <div className="flex items-center gap-1 bg-muted/60 rounded-lg p-0.5">
+                      {([
+                        { key: 'live' as const, icon: Radio, label: 'Live' },
+                        { key: 'ptt' as const, icon: Hand, label: 'Push-to-Talk' },
+                        { key: 'text' as const, icon: Keyboard, label: 'Text' },
+                      ]).map((m) => (
+                        <button
+                          key={m.key}
+                          onClick={() => {
+                            // Clean up current mode
+                            if (mode === 'live' && m.key !== 'live') {
+                              voiceConv.stopListening();
+                            }
+                            if (mode !== 'live' && m.key === 'live' && greetingPlayedRef.current) {
+                              // Switching to live mode mid-call → start listening
+                              voiceConv.startListening();
+                            }
+                            setMode(m.key);
+                            if (m.key === 'text') {
+                              setTimeout(() => inputRef.current?.focus(), 100);
+                            }
+                          }}
+                          className={cn(
+                            'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+                            mode === m.key
+                              ? m.key === 'live'
+                                ? 'bg-emerald-600 text-white shadow-sm'
+                                : m.key === 'ptt'
+                                  ? 'bg-rose-600 text-white shadow-sm'
+                                  : 'bg-blue-600 text-white shadow-sm'
+                              : 'text-muted-foreground hover:bg-muted',
+                          )}
+                        >
+                          <m.icon className="h-3.5 w-3.5" />
+                          {m.label}
+                        </button>
+                      ))}
                     </div>
+
                     <div className="flex items-center gap-2">
+                      {mode === 'live' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setShowSettings(!showSettings)}
+                          title="VAD Settings"
+                        >
+                          <Settings2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Label htmlFor="tts-toggle" className="text-[11px] text-muted-foreground">
                         TTS
                       </Label>
@@ -788,54 +1013,140 @@ export function VoiceSimulatorPage() {
                     </div>
                   </div>
 
-                  {voiceMode ? (
-                    /* ─── Voice Input ─── */
+                  {/* VAD Settings (collapsible) */}
+                  {showSettings && mode === 'live' && (
+                    <div className="mb-3 p-3 bg-muted/40 rounded-lg border space-y-3 animate-in slide-in-from-top-2 duration-200">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs">Speech Sensitivity</Label>
+                        <span className="text-[10px] text-muted-foreground font-mono">{speechThreshold.toFixed(3)}</span>
+                      </div>
+                      <Slider
+                        value={[speechThreshold]}
+                        onValueChange={([v]) => setSpeechThreshold(v)}
+                        min={0.005}
+                        max={0.05}
+                        step={0.001}
+                        className="w-full"
+                      />
+                      <p className="text-[10px] text-muted-foreground">Lower = more sensitive, Higher = less sensitive (ignores quiet sounds)</p>
+
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs">Silence Before Send</Label>
+                        <span className="text-[10px] text-muted-foreground font-mono">{silenceDuration}ms</span>
+                      </div>
+                      <Slider
+                        value={[silenceDuration]}
+                        onValueChange={([v]) => setSilenceDuration(v)}
+                        min={600}
+                        max={3000}
+                        step={100}
+                        className="w-full"
+                      />
+                      <p className="text-[10px] text-muted-foreground">How long to wait after you stop speaking before sending</p>
+                    </div>
+                  )}
+
+                  {/* ─── Live Mode ─── */}
+                  {mode === 'live' && (
+                    <div className="flex flex-col items-center gap-3 py-2">
+                      {/* Audio Level Meter */}
+                      <AudioLevelMeter
+                        level={voiceConv.audioLevel}
+                        isActive={voiceConv.isListening || voiceConv.isUserSpeaking}
+                      />
+
+                      {/* Central Visual Indicator */}
+                      <div className="relative">
+                        <div
+                          className={cn(
+                            'w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300',
+                            voiceConv.isListening
+                              ? 'bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-lg shadow-emerald-200 dark:shadow-emerald-900/30'
+                              : voiceConv.isUserSpeaking
+                                ? 'bg-gradient-to-br from-rose-500 to-pink-600 text-white scale-110 shadow-lg shadow-rose-200 dark:shadow-rose-900/30'
+                                : voiceConv.isProcessing
+                                  ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-200'
+                                  : voiceConv.isAgentSpeaking
+                                    ? 'bg-gradient-to-br from-amber-500 to-yellow-600 text-white shadow-lg shadow-amber-200'
+                                    : 'bg-muted text-muted-foreground',
+                          )}
+                        >
+                          {voiceConv.isListening && <Ear className="h-7 w-7" />}
+                          {voiceConv.isUserSpeaking && <Mic className="h-7 w-7 animate-pulse" />}
+                          {voiceConv.isProcessing && <Loader2 className="h-7 w-7 animate-spin" />}
+                          {voiceConv.isAgentSpeaking && <AudioLines className="h-7 w-7 animate-pulse" />}
+                          {voiceConv.isIdle && <Radio className="h-7 w-7" />}
+                        </div>
+                        {voiceConv.isListening && <PulseRings color="green" />}
+                        {voiceConv.isUserSpeaking && <PulseRings color="red" />}
+                      </div>
+
+                      {/* Barge-in button when agent is speaking */}
+                      {voiceConv.isAgentSpeaking && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={voiceConv.interruptAgent}
+                          className="gap-1.5 text-xs animate-in fade-in duration-200"
+                        >
+                          <CircleStop className="h-3.5 w-3.5" />
+                          Interrupt & Speak
+                        </Button>
+                      )}
+
+                      {/* Status text */}
+                      <p className="text-[11px] text-muted-foreground text-center">
+                        {voiceConv.isListening && 'Listening... Just speak naturally'}
+                        {voiceConv.isUserSpeaking && 'Hearing you... pause when done'}
+                        {voiceConv.isProcessing && 'Processing your speech...'}
+                        {voiceConv.isAgentSpeaking && 'Agent is responding... Click to interrupt'}
+                        {voiceConv.isIdle && 'Microphone initializing...'}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* ─── Push-to-Talk Mode ─── */}
+                  {mode === 'ptt' && (
                     <div className="flex flex-col items-center gap-3 py-2">
                       {isRecording && (
                         <div className="flex items-center gap-3">
                           <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
                           <span className="text-xs text-red-500 font-medium">Recording...</span>
-                          <LiveWaveform analyser={analyserRef.current} isActive={isRecording} />
+                          <LiveWaveform analyser={pttAnalyserRef.current} isActive={isRecording} />
                         </div>
                       )}
 
                       <div className="flex items-center gap-4">
-                        {isSpeaking && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={stopTTS}
-                            className="gap-1.5 text-xs"
-                          >
+                        {isSpeakingPTT && (
+                          <Button variant="outline" size="sm" onClick={stopPttTTS} className="gap-1.5 text-xs">
                             <CircleStop className="h-3.5 w-3.5" />
                             Stop Speaking
                           </Button>
                         )}
-
                         <button
                           onMouseDown={() => {
-                            if (!isPending && callActive && !isSpeaking) startRecording();
+                            if (!isPending && callActive && !isSpeakingPTT) startPttRecording();
                           }}
                           onMouseUp={() => {
-                            if (isRecording) stopRecording();
+                            if (isRecording) stopPttRecording();
                           }}
                           onMouseLeave={() => {
-                            if (isRecording) stopRecording();
+                            if (isRecording) stopPttRecording();
                           }}
                           onTouchStart={() => {
-                            if (!isPending && callActive && !isSpeaking) startRecording();
+                            if (!isPending && callActive && !isSpeakingPTT) startPttRecording();
                           }}
                           onTouchEnd={() => {
-                            if (isRecording) stopRecording();
+                            if (isRecording) stopPttRecording();
                           }}
-                          disabled={isPending || !callActive || isSpeaking}
+                          disabled={isPending || !callActive || isSpeakingPTT}
                           className={cn(
                             'relative w-16 h-16 rounded-full flex items-center justify-center transition-all duration-200',
                             isRecording
                               ? 'bg-red-500 text-white scale-110 shadow-lg shadow-red-200 dark:shadow-red-900/30'
                               : isPending
                                 ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                                : 'bg-gradient-to-br from-emerald-500 to-green-600 text-white hover:scale-105 shadow-lg shadow-emerald-200 dark:shadow-emerald-900/30 active:scale-95'
+                                : 'bg-gradient-to-br from-rose-500 to-pink-600 text-white hover:scale-105 shadow-lg shadow-rose-200 dark:shadow-rose-900/30 active:scale-95',
                           )}
                         >
                           {isPending ? (
@@ -850,15 +1161,13 @@ export function VoiceSimulatorPage() {
                       </div>
 
                       <p className="text-[11px] text-muted-foreground">
-                        {isPending
-                          ? 'Processing...'
-                          : isSpeaking
-                            ? 'Agent is speaking...'
-                            : 'Hold to speak · Release to send'}
+                        {isPending ? 'Processing...' : isSpeakingPTT ? 'Agent is speaking...' : 'Hold to speak · Release to send'}
                       </p>
                     </div>
-                  ) : (
-                    /* ─── Text Input ─── */
+                  )}
+
+                  {/* ─── Text Mode ─── */}
+                  {mode === 'text' && (
                     <div className="flex gap-2">
                       <Input
                         ref={inputRef}
@@ -923,18 +1232,7 @@ export function VoiceSimulatorPage() {
                     size="sm"
                     className="w-full justify-start text-xs h-auto py-2 px-3 text-left hover:bg-blue-50 dark:hover:bg-blue-900/20 font-normal"
                     disabled={!isInCall || isRinging || isPending || !callActive}
-                    onClick={() => {
-                      setMessages((prev) => [
-                        ...prev,
-                        {
-                          id: `msg-${Date.now()}`,
-                          role: 'user',
-                          content: phrase,
-                          timestamp: new Date(),
-                        },
-                      ]);
-                      sendTextMutation.mutate(phrase);
-                    }}
+                    onClick={() => handleQuickPhrase(phrase)}
                   >
                     <span className="truncate">{phrase}</span>
                   </Button>
@@ -956,7 +1254,10 @@ export function VoiceSimulatorPage() {
                     { label: 'Session', value: sessionId.slice(0, 18) + '...' },
                     { label: 'Messages', value: messages.length },
                     { label: 'Duration', value: formatDuration(callDuration) },
-                    { label: 'Mode', value: voiceMode ? 'Voice' : 'Text' },
+                    {
+                      label: 'Mode',
+                      value: mode === 'live' ? '🟢 Live' : mode === 'ptt' ? '🔴 Push-to-Talk' : '⌨️ Text',
+                    },
                     { label: 'TTS', value: ttsEnabled ? 'On' : 'Off' },
                   ].map((item) => (
                     <div key={item.label} className="flex justify-between items-center">
@@ -968,10 +1269,7 @@ export function VoiceSimulatorPage() {
                     <span className="text-muted-foreground">Status</span>
                     <Badge
                       variant={callActive ? 'default' : 'secondary'}
-                      className={cn(
-                        'text-[10px] h-5',
-                        callActive && 'bg-emerald-600 hover:bg-emerald-600'
-                      )}
+                      className={cn('text-[10px] h-5', callActive && 'bg-emerald-600 hover:bg-emerald-600')}
                     >
                       {callActive ? 'Active' : 'Ended'}
                     </Badge>
@@ -989,16 +1287,59 @@ export function VoiceSimulatorPage() {
                 How It Works
               </h3>
               <div className="space-y-3 text-xs text-muted-foreground">
-                {[
-                  { step: '1', label: 'You speak or type', desc: 'Audio is transcribed by Whisper', color: 'bg-rose-100 dark:bg-rose-900/30 text-rose-600' },
-                  { step: '2', label: 'AI processes', desc: 'LangGraph multi-agent routing', color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' },
-                  { step: '3', label: 'Agent responds', desc: 'Text + voice via OpenAI TTS', color: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' },
-                ].map((item) => (
+                {(mode === 'live'
+                  ? [
+                      {
+                        step: '1',
+                        label: 'Continuous Listening',
+                        desc: 'Mic is always on, VAD detects speech',
+                        color: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600',
+                      },
+                      {
+                        step: '2',
+                        label: 'Auto-Send on Silence',
+                        desc: `After ${(silenceDuration / 1000).toFixed(1)}s of silence, audio is sent`,
+                        color: 'bg-rose-100 dark:bg-rose-900/30 text-rose-600',
+                      },
+                      {
+                        step: '3',
+                        label: 'AI Responds + TTS',
+                        desc: 'Agent speaks, then listens again',
+                        color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600',
+                      },
+                      {
+                        step: '4',
+                        label: 'Interrupt Anytime',
+                        desc: 'Click to interrupt the agent mid-speech',
+                        color: 'bg-amber-100 dark:bg-amber-900/30 text-amber-600',
+                      },
+                    ]
+                  : [
+                      {
+                        step: '1',
+                        label: 'You speak or type',
+                        desc: 'Audio is transcribed by Whisper',
+                        color: 'bg-rose-100 dark:bg-rose-900/30 text-rose-600',
+                      },
+                      {
+                        step: '2',
+                        label: 'AI processes',
+                        desc: 'LangGraph multi-agent routing',
+                        color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600',
+                      },
+                      {
+                        step: '3',
+                        label: 'Agent responds',
+                        desc: 'Text + voice via OpenAI TTS',
+                        color: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600',
+                      },
+                    ]
+                ).map((item) => (
                   <div key={item.step} className="flex gap-2.5">
                     <div
                       className={cn(
                         'rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0 text-[10px] font-bold',
-                        item.color
+                        item.color,
                       )}
                     >
                       {item.step}
@@ -1040,10 +1381,7 @@ export function VoiceSimulatorPage() {
                   {sessionMessages.map((msg, idx) => (
                     <div
                       key={idx}
-                      className={cn(
-                        'flex gap-2.5',
-                        msg.role === 'user' ? 'justify-end' : 'justify-start'
-                      )}
+                      className={cn('flex gap-2.5', msg.role === 'user' ? 'justify-end' : 'justify-start')}
                     >
                       {msg.role !== 'user' && (
                         <div className="flex-shrink-0 mt-1">
@@ -1055,9 +1393,7 @@ export function VoiceSimulatorPage() {
                       <div
                         className={cn(
                           'max-w-[75%] rounded-xl px-3 py-2 shadow-sm',
-                          msg.role === 'user'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-card border'
+                          msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-card border',
                         )}
                       >
                         <p className="text-xs whitespace-pre-wrap">{msg.content}</p>
@@ -1072,7 +1408,7 @@ export function VoiceSimulatorPage() {
                             <span
                               className={cn(
                                 'text-[9px]',
-                                msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'
+                                msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground',
                               )}
                             >
                               {new Date(msg.timestamp).toLocaleTimeString([], {
