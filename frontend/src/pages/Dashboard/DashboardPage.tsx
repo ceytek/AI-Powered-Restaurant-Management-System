@@ -1,13 +1,26 @@
 import { useQuery } from '@tanstack/react-query';
-import { dashboardService, type DashboardSummary, type StaffScheduleItem } from '@/services/dashboardService';
+import { useNavigate } from 'react-router-dom';
+import {
+  dashboardService,
+  type DashboardSummary,
+  type StaffScheduleItem,
+  type LowStockItem,
+  type CategoryBreakdown,
+  type RecentMovement,
+} from '@/services/dashboardService';
 import { reservationService } from '@/services/reservationService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   Armchair, CalendarDays, Users, UtensilsCrossed,
   AlertTriangle, TrendingUp, Clock, UserCheck,
   Briefcase, UserCog, ChefHat, GlassWater,
+  Package, DollarSign, Trash2, ArrowUpCircle,
+  ArrowDownCircle, ShoppingCart, AlertCircle,
+  BarChart3, ExternalLink, RefreshCw, Box,
 } from 'lucide-react';
 import type { ReservationBrief, ReservationStatus } from '@/types';
 
@@ -47,7 +60,53 @@ const shiftColors: Record<string, string> = {
   'Split PM': 'bg-green-100 text-green-800',
 };
 
+const movementIcons: Record<string, typeof ArrowUpCircle> = {
+  purchase: ArrowDownCircle,
+  usage: ArrowUpCircle,
+  waste: Trash2,
+  adjustment: RefreshCw,
+  initial: Package,
+  return: ArrowDownCircle,
+  transfer: RefreshCw,
+};
+
+const movementColors: Record<string, string> = {
+  purchase: 'text-green-600 bg-green-50',
+  usage: 'text-blue-600 bg-blue-50',
+  waste: 'text-red-600 bg-red-50',
+  adjustment: 'text-amber-600 bg-amber-50',
+  initial: 'text-gray-600 bg-gray-50',
+  return: 'text-teal-600 bg-teal-50',
+  transfer: 'text-indigo-600 bg-indigo-50',
+};
+
+const severityConfig = {
+  critical: { color: 'bg-red-100 text-red-800 border-red-200', barColor: 'bg-red-500', icon: AlertCircle },
+  warning: { color: 'bg-orange-100 text-orange-800 border-orange-200', barColor: 'bg-orange-500', icon: AlertTriangle },
+  low: { color: 'bg-yellow-100 text-yellow-800 border-yellow-200', barColor: 'bg-yellow-500', icon: AlertTriangle },
+};
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+}
+
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return '—';
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
 export function DashboardPage() {
+  const navigate = useNavigate();
+
   const { data: summary, isLoading } = useQuery<DashboardSummary>({
     queryKey: ['dashboard-summary'],
     queryFn: dashboardService.getSummary,
@@ -69,9 +128,19 @@ export function DashboardPage() {
             <Card key={i}><CardContent className="pt-6"><Skeleton className="h-20 w-full" /></CardContent></Card>
           ))}
         </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card><CardContent className="pt-6"><Skeleton className="h-60 w-full" /></CardContent></Card>
+          <Card><CardContent className="pt-6"><Skeleton className="h-60 w-full" /></CardContent></Card>
+        </div>
       </div>
     );
   }
+
+  const lowStockItems = summary?.inventory.low_stock_items ?? [];
+  const criticalCount = lowStockItems.filter(i => i.severity === 'critical').length;
+  const warningCount = lowStockItems.filter(i => i.severity === 'warning').length;
+  const categoryBreakdown = summary?.inventory.category_breakdown ?? [];
+  const recentMovements = summary?.inventory.recent_movements ?? [];
 
   const stats = [
     {
@@ -91,6 +160,16 @@ export function DashboardPage() {
       bg: 'bg-green-50',
     },
     {
+      title: 'Inventory',
+      value: summary?.inventory.total_items ?? 0,
+      subtitle: `${formatCurrency(summary?.inventory.total_value ?? 0)} total value`,
+      icon: Package,
+      color: 'text-teal-600',
+      bg: 'bg-teal-50',
+      alert: (summary?.inventory.low_stock_alerts ?? 0) > 0,
+      alertText: `${summary?.inventory.low_stock_alerts ?? 0} low stock`,
+    },
+    {
       title: 'Staff on Duty',
       value: summary?.staff?.today_scheduled ?? 0,
       subtitle: `${summary?.staff?.total_active ?? 0} active total`,
@@ -105,15 +184,6 @@ export function DashboardPage() {
       icon: Users,
       color: 'text-purple-600',
       bg: 'bg-purple-50',
-    },
-    {
-      title: 'Menu Items',
-      value: summary?.menu.total_items ?? 0,
-      subtitle: `${summary?.inventory.low_stock_alerts ?? 0} low stock alerts`,
-      icon: UtensilsCrossed,
-      color: 'text-orange-600',
-      bg: 'bg-orange-50',
-      alert: (summary?.inventory.low_stock_alerts ?? 0) > 0,
     },
   ];
 
@@ -136,7 +206,30 @@ export function DashboardPage() {
         </p>
       </div>
 
-      {/* Stats Cards */}
+      {/* ==================== Critical Alerts Banner ==================== */}
+      {(criticalCount > 0 || (summary?.inventory.out_of_stock ?? 0) > 0) && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-4 animate-pulse-slow">
+          <div className="p-3 bg-red-100 rounded-lg">
+            <AlertCircle className="h-6 w-6 text-red-600" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-red-800">Critical Inventory Alert</h3>
+            <p className="text-xs text-red-700 mt-0.5">
+              {(summary?.inventory.out_of_stock ?? 0) > 0 && (
+                <span className="font-semibold">{summary?.inventory.out_of_stock} item{(summary?.inventory.out_of_stock ?? 0) > 1 ? 's' : ''} out of stock. </span>
+              )}
+              {criticalCount > 0 && (
+                <span>{criticalCount} item{criticalCount > 1 ? 's' : ''} critically low — immediate reorder needed.</span>
+              )}
+            </p>
+          </div>
+          <Button size="sm" variant="destructive" onClick={() => navigate('/inventory')}>
+            <ExternalLink className="h-3.5 w-3.5 mr-1" /> View Inventory
+          </Button>
+        </div>
+      )}
+
+      {/* ==================== Stats Cards ==================== */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {stats.map((stat) => (
           <Card key={stat.title} className="relative overflow-hidden">
@@ -147,7 +240,7 @@ export function DashboardPage() {
                   <p className="text-2xl font-bold mt-1">{stat.value}</p>
                   <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                     {stat.alert && <AlertTriangle className="h-3 w-3 text-orange-500" />}
-                    {stat.subtitle}
+                    {stat.alertText ? stat.alertText : stat.subtitle}
                   </p>
                 </div>
                 <div className={`p-3 rounded-lg ${stat.bg}`}>
@@ -159,7 +252,115 @@ export function DashboardPage() {
         ))}
       </div>
 
-      {/* Row 2: Reservations + Table Status */}
+      {/* ==================== Inventory Alerts Section ==================== */}
+      {lowStockItems.length > 0 && (
+        <Card className="border-orange-200">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-orange-100 rounded-lg">
+                <AlertTriangle className="h-5 w-5 text-orange-600" />
+              </div>
+              <div>
+                <CardTitle className="text-lg font-semibold">Low Stock Alerts</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {criticalCount > 0 && <span className="text-red-600 font-medium">{criticalCount} critical</span>}
+                  {criticalCount > 0 && warningCount > 0 && <span> · </span>}
+                  {warningCount > 0 && <span className="text-orange-600 font-medium">{warningCount} warning</span>}
+                  {(criticalCount > 0 || warningCount > 0) && lowStockItems.length > criticalCount + warningCount && <span> · </span>}
+                  {lowStockItems.length > criticalCount + warningCount && (
+                    <span className="text-yellow-600 font-medium">{lowStockItems.length - criticalCount - warningCount} low</span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => navigate('/inventory')}>
+              <ExternalLink className="h-3.5 w-3.5 mr-1" /> Manage Inventory
+            </Button>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="rounded-lg border overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/50">
+                    <TableHead className="w-[30px]"></TableHead>
+                    <TableHead>Item</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Stock Level</TableHead>
+                    <TableHead>Current</TableHead>
+                    <TableHead>Minimum</TableHead>
+                    <TableHead>Reorder Qty</TableHead>
+                    <TableHead>Value at Risk</TableHead>
+                    <TableHead>Location</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lowStockItems.map((item) => {
+                    const config = severityConfig[item.severity];
+                    const SeverityIcon = config.icon;
+                    const valueAtRisk = (item.minimum_stock - item.current_stock) * item.unit_cost;
+                    return (
+                      <TableRow key={item.id} className="hover:bg-muted/30">
+                        <TableCell className="pr-0">
+                          <SeverityIcon className={`h-4 w-4 ${item.severity === 'critical' ? 'text-red-500' : item.severity === 'warning' ? 'text-orange-500' : 'text-yellow-500'}`} />
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium text-sm">{item.name}</p>
+                            {item.sku && <p className="text-xs text-muted-foreground font-mono">{item.sku}</p>}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs font-normal">{item.category || '—'}</Badge>
+                        </TableCell>
+                        <TableCell className="min-w-[140px]">
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className={`font-semibold ${item.severity === 'critical' ? 'text-red-600' : item.severity === 'warning' ? 'text-orange-600' : 'text-yellow-600'}`}>
+                                {item.stock_percentage}%
+                              </span>
+                            </div>
+                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${config.barColor}`}
+                                style={{ width: `${Math.min(item.stock_percentage, 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className={`font-semibold ${item.severity === 'critical' ? 'text-red-600' : ''}`}>
+                            {item.current_stock} {item.unit || ''}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-muted-foreground">{item.minimum_stock} {item.unit || ''}</span>
+                        </TableCell>
+                        <TableCell>
+                          {item.reorder_quantity ? (
+                            <span className="text-sm">{item.reorder_quantity} {item.unit || ''}</span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">Not set</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm font-medium text-red-600">
+                            {formatCurrency(valueAtRisk > 0 ? valueAtRisk : 0)}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs text-muted-foreground">{item.storage_location || '—'}</span>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ==================== Row 2: Reservations + Table Status ==================== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Today's Reservations */}
         <Card>
@@ -233,19 +434,8 @@ export function DashboardPage() {
               ))}
             </div>
 
-            {(summary?.inventory.low_stock_alerts ?? 0) > 0 && (
-              <div className="mt-6 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                <div className="flex items-center gap-2 text-orange-800">
-                  <AlertTriangle className="h-4 w-4" />
-                  <span className="text-sm font-medium">
-                    {summary?.inventory.low_stock_alerts} inventory items are low on stock
-                  </span>
-                </div>
-              </div>
-            )}
-
             {(summary?.reservations_today.pending ?? 0) > 0 && (
-              <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="mt-6 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <div className="flex items-center gap-2 text-yellow-800">
                   <TrendingUp className="h-4 w-4" />
                   <span className="text-sm font-medium">
@@ -258,7 +448,142 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {/* Row 3: Staff Section */}
+      {/* ==================== Row 3: Inventory Overview ==================== */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Inventory Summary Cards */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-lg font-semibold">Inventory Summary</CardTitle>
+            <div className="p-2 bg-teal-50 rounded-lg">
+              <BarChart3 className="h-4 w-4 text-teal-600" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg bg-muted/50 border">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Package className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Total Items</span>
+                  </div>
+                  <p className="text-xl font-bold">{summary?.inventory.total_items ?? 0}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-muted/50 border">
+                  <div className="flex items-center gap-2 mb-1">
+                    <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Total Value</span>
+                  </div>
+                  <p className="text-xl font-bold">{formatCurrency(summary?.inventory.total_value ?? 0)}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-orange-50 border border-orange-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <AlertTriangle className="h-3.5 w-3.5 text-orange-500" />
+                    <span className="text-xs text-orange-700">Low Stock</span>
+                  </div>
+                  <p className="text-xl font-bold text-orange-700">{summary?.inventory.low_stock_alerts ?? 0}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                    <span className="text-xs text-red-700">Waste (7d)</span>
+                  </div>
+                  <p className="text-xl font-bold text-red-700">{formatCurrency(summary?.inventory.waste_last_7_days ?? 0)}</p>
+                </div>
+              </div>
+
+              {/* Category breakdown */}
+              {categoryBreakdown.length > 0 && (
+                <div className="pt-2">
+                  <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wider">By Category</p>
+                  <div className="space-y-2 max-h-52 overflow-y-auto">
+                    {categoryBreakdown.map((cat) => (
+                      <div key={cat.name} className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors">
+                        <div className="flex items-center gap-2">
+                          <Box className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-sm">{cat.name}</span>
+                          {cat.low_stock_count > 0 && (
+                            <Badge variant="destructive" className="text-[10px] h-4 px-1">
+                              {cat.low_stock_count}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-muted-foreground">{cat.item_count} items</span>
+                          <span className="text-xs font-medium w-16 text-right">{formatCurrency(cat.total_value)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Recent Stock Activity */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-lg font-semibold">Recent Stock Activity</CardTitle>
+            <Button size="sm" variant="ghost" onClick={() => navigate('/inventory')}>
+              View All <ExternalLink className="h-3.5 w-3.5 ml-1" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {recentMovements.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                <Package className="h-10 w-10 mb-2 opacity-40" />
+                <p className="text-sm">No recent stock activity</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                {recentMovements.map((m) => {
+                  const MoveIcon = movementIcons[m.movement_type] ?? RefreshCw;
+                  const colorClass = movementColors[m.movement_type] ?? 'text-gray-600 bg-gray-50';
+                  const [textColor, bgColor] = colorClass.split(' ');
+                  const isPositive = m.quantity > 0;
+
+                  return (
+                    <div key={m.id} className="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/30 transition-colors">
+                      <div className={`p-2 rounded-lg ${bgColor}`}>
+                        <MoveIcon className={`h-4 w-4 ${textColor}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium truncate">{m.item_name}</p>
+                          <Badge variant="outline" className={`text-[10px] capitalize ${colorClass}`}>
+                            {m.movement_type}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+                          {m.performed_by && <span>{m.performed_by}</span>}
+                          <span>•</span>
+                          <span>{timeAgo(m.performed_at)}</span>
+                          {m.notes && (
+                            <>
+                              <span>•</span>
+                              <span className="truncate max-w-[150px]">{m.notes}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className={`text-sm font-semibold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                          {isPositive ? '+' : ''}{m.quantity}
+                        </p>
+                        {m.total_cost != null && (
+                          <p className="text-xs text-muted-foreground">{formatCurrency(m.total_cost)}</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ==================== Row 4: Staff Section ==================== */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Department Breakdown */}
         <Card>

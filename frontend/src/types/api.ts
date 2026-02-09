@@ -219,6 +219,7 @@ export interface InventoryItem {
   minimum_stock: string;
   maximum_stock?: string;
   reorder_point?: string;
+  reorder_quantity?: string;
   unit_cost: string;
   storage_location?: string;
   storage_temperature?: string;
@@ -238,6 +239,9 @@ export interface InventoryItemCreate {
   sku?: string;
   current_stock?: number;
   minimum_stock?: number;
+  maximum_stock?: number;
+  reorder_point?: number;
+  reorder_quantity?: number;
   unit_cost?: number;
   storage_location?: string;
   storage_temperature?: string;
@@ -268,10 +272,16 @@ export interface Supplier {
   contact_name?: string;
   email?: string;
   phone?: string;
+  mobile?: string;
+  address?: string;
   city?: string;
   country?: string;
+  tax_id?: string;
   payment_terms?: string;
+  delivery_days?: string;
+  minimum_order?: string;
   rating?: number;
+  notes?: string;
   is_active: boolean;
   created_at: string;
 }
