@@ -4,6 +4,7 @@ import { reservationService } from '@/services/reservationService';
 import { tableService } from '@/services/tableService';
 import { PageHeader } from '@/components/common/PageHeader';
 import { StatusBadge } from '@/components/common/StatusBadge';
+import { CustomerSearch } from '@/components/common/CustomerSearch';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { CalendarDays, Loader2, Clock, Users, MoreHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import type { Reservation, ReservationStatus } from '@/types';
+import type { Reservation, ReservationStatus, CustomerBrief } from '@/types';
 
 const statusFlow: Record<string, ReservationStatus[]> = {
   pending: ['confirmed', 'cancelled'],
@@ -33,12 +34,33 @@ export function ReservationsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerBrief | null>(null);
   const [form, setForm] = useState({
     customer_name: '', customer_phone: '', customer_email: '',
     party_size: 2, date: new Date().toISOString().split('T')[0],
     start_time: '19:00', duration_minutes: 90,
     table_id: '', special_requests: '', source: 'manual',
   });
+
+  const handleCustomerSelect = (customer: CustomerBrief) => {
+    setSelectedCustomer(customer);
+    setForm(prev => ({
+      ...prev,
+      customer_name: `${customer.first_name} ${customer.last_name || ''}`.trim(),
+      customer_phone: customer.phone || '',
+      customer_email: customer.email || '',
+    }));
+  };
+
+  const handleCustomerClear = () => {
+    setSelectedCustomer(null);
+    setForm(prev => ({
+      ...prev,
+      customer_name: '',
+      customer_phone: '',
+      customer_email: '',
+    }));
+  };
 
   const { data: reservationsData, isLoading } = useQuery({
     queryKey: ['reservations', search, statusFilter],
@@ -64,7 +86,9 @@ export function ReservationsPage() {
       queryClient.invalidateQueries({ queryKey: ['reservations'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
       queryClient.invalidateQueries({ queryKey: ['today-reservations'] });
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
       setShowCreate(false);
+      setSelectedCustomer(null);
       toast.success('Reservation created successfully');
     },
     onError: () => toast.error('Failed to create reservation'),
@@ -149,23 +173,56 @@ export function ReservationsPage() {
       </Card>
 
       {/* Create Reservation Dialog */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+      <Dialog open={showCreate} onOpenChange={(open) => {
+        setShowCreate(open);
+        if (!open) { setSelectedCustomer(null); }
+      }}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>New Reservation</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto">
+            {/* Customer Search */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Find Existing Customer</Label>
+              <CustomerSearch
+                selectedCustomer={selectedCustomer}
+                onSelect={handleCustomerSelect}
+                onClear={handleCustomerClear}
+              />
+            </div>
+
+            {/* Customer Info Fields - editable, auto-filled when customer selected */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Customer Name *</Label>
-                <Input value={form.customer_name} onChange={(e) => setForm(p => ({ ...p, customer_name: e.target.value }))} placeholder="John Smith" />
+                <Input
+                  value={form.customer_name}
+                  onChange={(e) => setForm(p => ({ ...p, customer_name: e.target.value }))}
+                  placeholder="John Smith"
+                  disabled={!!selectedCustomer}
+                  className={selectedCustomer ? 'bg-muted' : ''}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Phone</Label>
-                <Input value={form.customer_phone} onChange={(e) => setForm(p => ({ ...p, customer_phone: e.target.value }))} placeholder="+1234567890" />
+                <Input
+                  value={form.customer_phone}
+                  onChange={(e) => setForm(p => ({ ...p, customer_phone: e.target.value }))}
+                  placeholder="+1234567890"
+                  disabled={!!selectedCustomer}
+                  className={selectedCustomer ? 'bg-muted' : ''}
+                />
               </div>
             </div>
             <div className="space-y-2">
               <Label>Email</Label>
-              <Input type="email" value={form.customer_email} onChange={(e) => setForm(p => ({ ...p, customer_email: e.target.value }))} placeholder="john@example.com" />
+              <Input
+                type="email"
+                value={form.customer_email}
+                onChange={(e) => setForm(p => ({ ...p, customer_email: e.target.value }))}
+                placeholder="john@example.com"
+                disabled={!!selectedCustomer}
+                className={selectedCustomer ? 'bg-muted' : ''}
+              />
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
