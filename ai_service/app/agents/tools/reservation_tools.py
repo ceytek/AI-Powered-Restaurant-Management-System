@@ -299,6 +299,10 @@ def create_reservation_tools(db: AsyncSession, company_id: str):
             query: Customer name, phone number, or reservation number (e.g., RES-00001)
         """
         try:
+            # Also extract digits for fuzzy reservation number matching
+            digits = "".join(c for c in query if c.isdigit())
+            digit_pattern = f"%{digits}" if digits else None
+
             result = await db.execute(text("""
                 SELECT r.reservation_number, r.customer_name, r.customer_phone,
                        r.date, r.start_time, r.party_size, r.status,
@@ -311,10 +315,11 @@ def create_reservation_tools(db: AsyncSession, company_id: str):
                       r.customer_name ILIKE :query
                       OR r.customer_phone ILIKE :query
                       OR r.reservation_number ILIKE :query
+                      OR (:digit_pattern IS NOT NULL AND r.reservation_number ILIKE :digit_pattern)
                   )
                 ORDER BY r.date ASC, r.start_time ASC
                 LIMIT 5
-            """), {"company_id": company_id, "query": f"%{query}%"})
+            """), {"company_id": company_id, "query": f"%{query}%", "digit_pattern": digit_pattern})
 
             reservations = result.fetchall()
             if not reservations:
@@ -347,20 +352,35 @@ def create_reservation_tools(db: AsyncSession, company_id: str):
             reason: Reason for cancellation (optional)
         """
         try:
+            # Normalize: extract digits from the reservation number for fuzzy matching
+            # User might say "RES-0004" but DB has "RES-00004"
+            digits = "".join(c for c in reservation_number if c.isdigit())
+            search_pattern = f"%{digits}" if digits else f"%{reservation_number}%"
+
             result = await db.execute(text("""
-                SELECT id, customer_name, date, start_time, party_size, status
+                SELECT id, reservation_number, customer_name, date, start_time, party_size, status
                 FROM reservations
                 WHERE company_id = :company_id
-                  AND reservation_number = :res_number
+                  AND (
+                      reservation_number ILIKE :pattern
+                      OR reservation_number ILIKE :exact
+                  )
+                ORDER BY created_at DESC
                 LIMIT 1
-            """), {"company_id": company_id, "res_number": reservation_number})
+            """), {
+                "company_id": company_id,
+                "pattern": search_pattern,
+                "exact": f"%{reservation_number}%",
+            })
 
             reservation = result.fetchone()
             if not reservation:
                 return f"I couldn't find reservation {reservation_number}. Could you double-check the number?"
 
+            actual_number = reservation.reservation_number
+
             if reservation.status in ('cancelled', 'completed', 'no_show'):
-                return f"Reservation {reservation_number} is already {reservation.status}."
+                return f"Reservation {actual_number} is already {reservation.status}."
 
             await db.execute(text("""
                 UPDATE reservations
@@ -376,7 +396,7 @@ def create_reservation_tools(db: AsyncSession, company_id: str):
             await db.commit()
 
             return (
-                f"Reservation {reservation_number} has been cancelled.\n"
+                f"Reservation {actual_number} has been successfully cancelled.\n"
                 f"- Name: {reservation.customer_name}\n"
                 f"- Was for: {reservation.date.strftime('%A %B %d')} at {reservation.start_time.strftime('%I:%M %p')}, party of {reservation.party_size}\n"
                 f"The table is now available for other guests."
