@@ -19,8 +19,9 @@ router = APIRouter(prefix="/voice", tags=["Voice"])
 
 logger = logging.getLogger(__name__)
 
-# Minimum audio size in bytes to process (filter out silence/noise clips)
-MIN_AUDIO_SIZE = 1000  # ~1KB
+# Minimum audio size in bytes to process (filter out silence/noise clips).
+# WebM/opus at 48kHz encodes ~6KB/s, so 2KB ≈ 0.3s of real audio.
+MIN_AUDIO_SIZE = 2000
 
 
 # ==================== Schemas ====================

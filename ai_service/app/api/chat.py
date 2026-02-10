@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="User message")
     session_id: Optional[str] = Field(None, description="Session ID for continuing a conversation")
     customer_phone: Optional[str] = Field(None, description="Customer phone number (for caller ID)")
+    input_type: Optional[str] = Field("text", description="Input type: text or voice")
 
 
 class ChatResponse(BaseModel):
@@ -82,7 +83,7 @@ async def send_message(
         message=data.message,
         session_id=data.session_id,
         customer_phone=data.customer_phone,
-        input_type="text",
+        input_type=data.input_type or "text",
     )
 
     return ChatResponse(**result)

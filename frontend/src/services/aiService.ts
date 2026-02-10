@@ -16,6 +16,7 @@ export interface ChatRequest {
   message: string;
   session_id?: string;
   customer_phone?: string;
+  input_type?: 'text' | 'voice';
 }
 
 export interface ChatResponse {

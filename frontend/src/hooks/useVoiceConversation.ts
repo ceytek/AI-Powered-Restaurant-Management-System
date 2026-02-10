@@ -21,7 +21,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { aiService, type VoiceChatResponse } from '@/services/aiService';
+import { aiService } from '@/services/aiService';
 
 /* ───────── Types ───────── */
 export type ConversationState =
@@ -37,17 +37,19 @@ export interface VoiceConversationCallbacks {
   onAgentMessage: (text: string, latencyMs?: number, toolsUsed?: string[]) => void;
   onCallActive: (active: boolean) => void;
   onError: (msg: string) => void;
+  /** Called with processing stage description ("Transcribing…", "Thinking…") */
+  onProcessingStage?: (stage: string) => void;
 }
 
 export interface VoiceConversationConfig {
   companyId: string;
   sessionId: string | null;
   ttsEnabled: boolean;
-  /** RMS threshold to consider as speech (0‑1). Default 0.015 */
+  /** RMS threshold to consider as speech (0‑1). Default 0.02 */
   speechThreshold?: number;
-  /** Milliseconds of silence before ending a speech segment. Default 1400 */
+  /** Milliseconds of silence before ending a speech segment. Default 2500 */
   silenceDurationMs?: number;
-  /** Minimum speech duration (ms) to actually send. Default 400 */
+  /** Minimum speech duration (ms) to actually send. Default 600 */
   minSpeechMs?: number;
 }
 
@@ -73,9 +75,9 @@ export function useVoiceConversation(
     companyId,
     sessionId,
     ttsEnabled,
-    speechThreshold = 0.015,
-    silenceDurationMs = 1400,
-    minSpeechMs = 400,
+    speechThreshold = 0.02,
+    silenceDurationMs = 2500,
+    minSpeechMs = 600,
   } = config;
 
   /* ── State ── */
@@ -95,6 +97,8 @@ export function useVoiceConversation(
   const vadFrameRef = useRef<number>(0);
   const speechStartTimeRef = useRef<number>(0);
   const lastSpeechTimeRef = useRef<number>(0);
+  /** Peak RMS during a recording – used to reject silent clips */
+  const peakRmsRef = useRef<number>(0);
   const sessionIdRef = useRef<string | null>(sessionId);
 
   // Keep refs in sync
@@ -109,10 +113,19 @@ export function useVoiceConversation(
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
-  /* ── State setter that also updates ref ── */
+  /* ── State setter that also updates ref + mic muting ── */
   const setConvState = useCallback((s: ConversationState) => {
     stateRef.current = s;
     setState(s);
+
+    // Mute/unmute mic tracks to prevent echo & accidental captures
+    const stream = streamRef.current;
+    if (stream) {
+      const shouldMute = s === 'PROCESSING' || s === 'AGENT_SPEAKING';
+      stream.getAudioTracks().forEach((t) => {
+        t.enabled = !shouldMute;
+      });
+    }
   }, []);
 
   /* ───────────── TTS Playback ───────────── */
@@ -167,15 +180,37 @@ export function useVoiceConversation(
     }
   }, []);
 
-  /* ───────────── Send Audio to Backend ───────────── */
+  /* ───────────── Send Audio to Backend (two-step: transcribe → chat) ───────────── */
   const sendAudioToBackend = useCallback(async (blob: Blob) => {
     setConvState('PROCESSING');
+    callbacksRef.current.onProcessingStage?.('Transcribing...');
 
     try {
-      const data: VoiceChatResponse = await aiService.voiceChat(
-        blob,
+      // STEP 1: Transcribe audio → show user text immediately
+      const transcription = await aiService.transcribe(blob);
+      const userText = transcription.text?.trim();
+
+      if (!userText) {
+        // Nothing meaningful transcribed → go back to listening
+        console.log('[VoiceConv] Empty transcription, returning to listening');
+        if (stateRef.current !== 'IDLE') {
+          setConvState('LISTENING');
+        }
+        return;
+      }
+
+      // Show the user's words instantly (before AI processes)
+      callbacksRef.current.onUserMessage(userText);
+      callbacksRef.current.onProcessingStage?.('Thinking...');
+
+      // STEP 2: Send text to AI agent
+      const data = await aiService.sendMessage(
         companyIdRef.current,
-        sessionIdRef.current || undefined,
+        {
+          message: userText,
+          session_id: sessionIdRef.current || undefined,
+          input_type: 'voice',
+        },
       );
 
       // Update session
@@ -186,14 +221,9 @@ export function useVoiceConversation(
 
       callbacksRef.current.onCallActive(data.call_active);
 
-      // Show user transcription
-      if (data.transcribed_text) {
-        callbacksRef.current.onUserMessage(data.transcribed_text);
-      }
-
       // Show agent response
       callbacksRef.current.onAgentMessage(
-        data.text_response,
+        data.response,
         data.latency_ms,
         data.tools_used,
       );
@@ -201,8 +231,7 @@ export function useVoiceConversation(
       // If call ended
       if (!data.call_active) {
         if (ttsEnabledRef.current) {
-          await playTTS(data.text_response);
-          // After farewell TTS, stay in AGENT_SPEAKING briefly then stop
+          await playTTS(data.response);
           setTimeout(() => setConvState('IDLE'), 500);
         } else {
           setConvState('IDLE');
@@ -211,7 +240,7 @@ export function useVoiceConversation(
       }
 
       // Play TTS (which will transition to LISTENING after done)
-      await playTTS(data.text_response);
+      await playTTS(data.response);
     } catch (e: any) {
       console.error('[VoiceConv] Backend error:', e);
       callbacksRef.current.onError('Voice processing failed. Returning to listening...');
@@ -250,6 +279,7 @@ export function useVoiceConversation(
           // Speech detected → start recording
           speechStartTimeRef.current = now;
           lastSpeechTimeRef.current = now;
+          peakRmsRef.current = rms;
           setConvState('USER_SPEAKING');
 
           // Start MediaRecorder
@@ -270,15 +300,19 @@ export function useVoiceConversation(
               recorder.onstop = () => {
                 const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
                 const speechDuration = Date.now() - speechStartTimeRef.current;
+                const peakRms = peakRmsRef.current;
 
-                if (audioBlob.size > 500 && speechDuration >= minSpeechMs) {
-                  sendAudioToBackend(audioBlob);
-                } else {
-                  // Too short → go back to listening
-                  console.log('[VoiceConv] Speech too short, ignoring');
+                // Reject: too short, too small, or too quiet (likely noise/silence)
+                const MIN_PEAK_RMS = 0.025;
+                if (audioBlob.size < 1000 || speechDuration < minSpeechMs || peakRms < MIN_PEAK_RMS) {
+                  console.log(
+                    `[VoiceConv] Rejected: size=${audioBlob.size}, dur=${speechDuration}ms, peak=${peakRms.toFixed(4)}`,
+                  );
                   if (stateRef.current !== 'IDLE') {
                     setConvState('LISTENING');
                   }
+                } else {
+                  sendAudioToBackend(audioBlob);
                 }
               };
 
@@ -291,6 +325,7 @@ export function useVoiceConversation(
       } else if (currentState === 'USER_SPEAKING') {
         if (isSpeech) {
           lastSpeechTimeRef.current = now;
+          if (rms > peakRmsRef.current) peakRmsRef.current = rms;
         } else {
           // Check if silence long enough
           const silenceMs = now - lastSpeechTimeRef.current;

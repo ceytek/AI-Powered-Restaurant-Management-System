@@ -202,8 +202,11 @@ export function VoiceSimulatorPage() {
   const [mode, setMode] = useState<InteractionMode>('live');
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
-  const [speechThreshold, setSpeechThreshold] = useState(0.015);
-  const [silenceDuration, setSilenceDuration] = useState(1400);
+  const [speechThreshold, setSpeechThreshold] = useState(0.02);
+  const [silenceDuration, setSilenceDuration] = useState(2500);
+
+  /* ─── Processing stage (for granular progress) ─── */
+  const [processingStage, setProcessingStage] = useState<string>('');
 
   /* ─── Push-to-Talk refs ─── */
   const [isRecording, setIsRecording] = useState(false);
@@ -271,13 +274,35 @@ export function VoiceSimulatorPage() {
         }
       },
       onError: (msg) => toast.error(msg),
+      onProcessingStage: (stage) => setProcessingStage(stage),
     },
   );
 
-  /* ─── Auto-scroll ─── */
+  /* ─── Refs for scroll container ─── */
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const userScrolledUpRef = useRef(false);
+
+  /* ─── Auto-scroll (only when user is near the bottom) ─── */
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // If the user scrolled up, don't force them down
+    if (userScrolledUpRef.current) return;
+    // Scroll to bottom
+    el.scrollTop = el.scrollHeight;
   }, [messages]);
+
+  /* ─── Detect manual scroll-up ─── */
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      userScrolledUpRef.current = !atBottom;
+    };
+    el.addEventListener('scroll', handleScroll);
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
 
   /* ─── Call timer ─── */
   useEffect(() => {
@@ -647,7 +672,7 @@ export function VoiceSimulatorPage() {
         case 'USER_SPEAKING':
           return 'Live · You\'re speaking';
         case 'PROCESSING':
-          return 'Live · Processing...';
+          return `Live · ${processingStage || 'Processing...'}`;
         case 'AGENT_SPEAKING':
           return 'Live · Agent speaking';
         default:
@@ -764,7 +789,10 @@ export function VoiceSimulatorPage() {
 
             {/* ── Chat + Interaction Area ── */}
             <div className="flex flex-col" style={{ height: 'calc(100vh - 320px)', minHeight: '500px' }}>
-              <ScrollArea className="flex-1 px-5 py-4">
+              <div
+                ref={scrollContainerRef}
+                className="flex-1 overflow-y-auto px-5 py-4"
+              >
                 {!isInCall && messages.length === 0 ? (
                   /* ─── Idle Screen ─── */
                   <div className="flex flex-col items-center justify-center h-full min-h-[420px] text-center">
@@ -924,7 +952,11 @@ export function VoiceSimulatorPage() {
                               <div className="w-2 h-2 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                             </div>
                             <span className="text-[11px] text-muted-foreground ml-1">
-                              {voiceConv.isProcessing || voiceChatMutation.isPending ? 'Processing voice...' : 'Thinking...'}
+                              {voiceConv.isProcessing
+                                ? (processingStage || 'Processing...')
+                                : voiceChatMutation.isPending
+                                  ? 'Processing voice...'
+                                  : 'Thinking...'}
                             </span>
                           </div>
                         </div>
@@ -943,7 +975,7 @@ export function VoiceSimulatorPage() {
                     <div ref={messagesEndRef} />
                   </div>
                 )}
-              </ScrollArea>
+              </div>
 
               {/* ── Bottom Input Area ── */}
               {isInCall && !isRinging && (
@@ -1098,7 +1130,7 @@ export function VoiceSimulatorPage() {
                       <p className="text-[11px] text-muted-foreground text-center">
                         {voiceConv.isListening && 'Listening... Just speak naturally'}
                         {voiceConv.isUserSpeaking && 'Hearing you... pause when done'}
-                        {voiceConv.isProcessing && 'Processing your speech...'}
+                        {voiceConv.isProcessing && (processingStage || 'Processing...')}
                         {voiceConv.isAgentSpeaking && 'Agent is responding... Click to interrupt'}
                         {voiceConv.isIdle && 'Microphone initializing...'}
                       </p>
