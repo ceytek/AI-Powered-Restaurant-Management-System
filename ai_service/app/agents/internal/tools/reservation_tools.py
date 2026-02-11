@@ -139,4 +139,44 @@ def create_internal_reservation_tools(db: AsyncSession, company_id: str):
             logger.error(f"get_upcoming_reservations error: {e}")
             return f"Error fetching upcoming reservations: {str(e)}"
 
-    return [get_todays_reservations, get_reservation_stats, get_upcoming_reservations]
+    @tool
+    async def get_reservations_by_date(date: str) -> str:
+        """Get all reservations for a specific date.
+
+        Args:
+            date: The date to query in YYYY-MM-DD format (e.g. '2026-02-12' for tomorrow).
+        """
+        try:
+            result = await db.execute(text("""
+                SELECT r.reservation_number, r.customer_name, r.customer_phone,
+                       r.date, r.start_time, r.end_time, r.party_size, r.status,
+                       r.special_requests, t.table_number, ts.name as section_name
+                FROM reservations r
+                LEFT JOIN tables t ON r.table_id = t.id
+                LEFT JOIN table_sections ts ON t.section_id = ts.id
+                WHERE r.company_id = :company_id
+                  AND r.date = :target_date
+                ORDER BY r.start_time
+            """), {"company_id": company_id, "target_date": date})
+
+            rows = result.fetchall()
+            if not rows:
+                return f"No reservations found for {date}."
+
+            lines = [f"📅 RESERVATIONS FOR {date} ({len(rows)} total):\n"]
+            for r in rows:
+                status_icon = {"confirmed": "✅", "pending": "⏳", "seated": "🍽️", "completed": "✓", "cancelled": "❌", "no_show": "🚫"}.get(r.status, "❓")
+                time_str = r.start_time.strftime('%H:%M') if r.start_time else '?'
+                table_str = f"Table {r.table_number}" if r.table_number else "No table"
+                section_str = f" ({r.section_name})" if r.section_name else ""
+                lines.append(
+                    f"  {status_icon} {time_str} — {r.customer_name} | Party of {r.party_size} | "
+                    f"{table_str}{section_str} | {r.status.upper()} | #{r.reservation_number}"
+                    f"{' | Note: ' + r.special_requests if r.special_requests else ''}"
+                )
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"get_reservations_by_date error: {e}")
+            return f"Error fetching reservations for {date}: {str(e)}"
+
+    return [get_todays_reservations, get_reservation_stats, get_upcoming_reservations, get_reservations_by_date]
