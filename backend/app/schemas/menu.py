@@ -1,9 +1,9 @@
 """Schemas for Menu management."""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 
 # ==================== Menu Categories ====================
@@ -71,8 +71,8 @@ class MenuItemCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
     short_description: Optional[str] = Field(None, max_length=300)
-    price: Decimal = Field(..., ge=0, decimal_places=2)
-    cost_price: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
+    price: Decimal = Field(..., ge=0)
+    cost_price: Optional[Decimal] = Field(None, ge=0)
     currency: str = Field("USD", max_length=3)
     image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -94,14 +94,21 @@ class MenuItemCreate(BaseModel):
     allergen_ids: Optional[List[UUID]] = []
     tags: Optional[List[str]] = []
 
+    @field_validator('price', 'cost_price', mode='before')
+    @classmethod
+    def round_to_two_decimals(cls, v):
+        if v is not None:
+            return Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        return v
+
 
 class MenuItemUpdate(BaseModel):
     category_id: Optional[UUID] = None
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = None
     short_description: Optional[str] = Field(None, max_length=300)
-    price: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
-    cost_price: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
+    price: Optional[Decimal] = Field(None, ge=0)
+    cost_price: Optional[Decimal] = Field(None, ge=0)
     image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     calories: Optional[int] = Field(None, ge=0)
@@ -121,6 +128,13 @@ class MenuItemUpdate(BaseModel):
     search_keywords: Optional[str] = None
     allergen_ids: Optional[List[UUID]] = None
     tags: Optional[List[str]] = None
+
+    @field_validator('price', 'cost_price', mode='before')
+    @classmethod
+    def round_to_two_decimals(cls, v):
+        if v is not None:
+            return Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        return v
 
 
 class MenuItemVariantSchema(BaseModel):
