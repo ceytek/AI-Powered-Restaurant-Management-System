@@ -4,9 +4,6 @@ import {
   dashboardService,
   type DashboardSummary,
   type StaffScheduleItem,
-  type LowStockItem,
-  type CategoryBreakdown,
-  type RecentMovement,
 } from '@/services/dashboardService';
 import { reservationService } from '@/services/reservationService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,11 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
-  Armchair, CalendarDays, Users, UtensilsCrossed,
+  Armchair, CalendarDays, Users,
   AlertTriangle, TrendingUp, Clock, UserCheck,
   Briefcase, UserCog, ChefHat, GlassWater,
   Package, DollarSign, Trash2, ArrowUpCircle,
-  ArrowDownCircle, ShoppingCart, AlertCircle,
+  ArrowDownCircle, AlertCircle,
   BarChart3, ExternalLink, RefreshCw, Box,
 } from 'lucide-react';
 import type { ReservationBrief, ReservationStatus } from '@/types';

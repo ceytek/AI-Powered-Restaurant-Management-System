@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { UtensilsCrossed, Loader2, Leaf, Clock, Flame, Star, FolderPlus } from 'lucide-react';
+import type { MenuItem } from '@/types';
 
 export function MenuPage() {
   const queryClient = useQueryClient();

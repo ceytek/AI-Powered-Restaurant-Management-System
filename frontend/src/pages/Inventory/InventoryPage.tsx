@@ -2,11 +2,10 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { inventoryService } from '@/services/inventoryService';
 import { PageHeader } from '@/components/common/PageHeader';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -15,8 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import {
   Package, Loader2, AlertTriangle, ArrowDownCircle, ArrowUpCircle,
-  FolderPlus, TrendingDown, DollarSign, Box, Truck, RefreshCw,
-  Trash2, Eye, Edit, AlertCircle, BarChart3, ShoppingCart,
+  FolderPlus, TrendingDown, DollarSign, Truck, RefreshCw,
+  Trash2, Eye, Edit, AlertCircle, BarChart3,
 } from 'lucide-react';
 import type { InventoryItem } from '@/types';
 
