@@ -277,7 +277,7 @@ export function StaffPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreatePosition(false)}>Cancel</Button>
             <Button onClick={() => createPosMutation.mutate()} disabled={!posForm.name || createPosMutation.isPending}>
-              {createPosMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+              {createPosMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
               Create Position
             </Button>
           </DialogFooter>
@@ -317,7 +317,7 @@ export function StaffPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateShift(false)}>Cancel</Button>
             <Button onClick={() => createShiftMutation.mutate()} disabled={!shiftForm.name || createShiftMutation.isPending}>
-              {createShiftMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+              {createShiftMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
               Create Shift
             </Button>
           </DialogFooter>

@@ -239,7 +239,7 @@ export function TablesPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateTable(false)}>Cancel</Button>
             <Button onClick={() => createTableMutation.mutate(newTable)} disabled={!newTable.table_number || createTableMutation.isPending}>
-              {createTableMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+              {createTableMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
               Create Table
             </Button>
           </DialogFooter>
@@ -273,7 +273,7 @@ export function TablesPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateSection(false)}>Cancel</Button>
             <Button onClick={() => createSectionMutation.mutate(newSection)} disabled={!newSection.name || createSectionMutation.isPending}>
-              {createSectionMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+              {createSectionMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
               Create Section
             </Button>
           </DialogFooter>

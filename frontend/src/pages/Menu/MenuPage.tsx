@@ -206,7 +206,7 @@ export function MenuPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateItem(false)}>Cancel</Button>
             <Button onClick={() => createItemMutation.mutate()} disabled={!itemForm.name || !itemForm.price || createItemMutation.isPending}>
-              {createItemMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+              {createItemMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
               Create Item
             </Button>
           </DialogFooter>
@@ -230,7 +230,7 @@ export function MenuPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateCategory(false)}>Cancel</Button>
             <Button onClick={() => createCatMutation.mutate()} disabled={!catForm.name || createCatMutation.isPending}>
-              {createCatMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+              {createCatMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
               Create
             </Button>
           </DialogFooter>

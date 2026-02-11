@@ -213,7 +213,7 @@ export function CustomersPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button onClick={() => createMutation.mutate()} disabled={!form.first_name || createMutation.isPending}>
-              {createMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+              {createMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
               Create Customer
             </Button>
           </DialogFooter>
