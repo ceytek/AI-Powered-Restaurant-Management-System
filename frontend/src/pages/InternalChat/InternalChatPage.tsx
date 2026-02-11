@@ -225,7 +225,7 @@ export default function InternalChatPage() {
             <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold">AI Assistant</h1>
+            <h1 className="text-xl font-bold">Internal Assistant</h1>
             <p className="text-xs text-muted-foreground">
               Ask about inventory, staff, reservations, tables & more
             </p>

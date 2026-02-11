@@ -76,7 +76,7 @@ const navItems = [
 
 const bottomNavItems = [
   {
-    title: 'AI Assistant',
+    title: 'Internal Assistant',
     href: '/ai-assistant',
     icon: Sparkles,
     permission: 'dashboard.read',
