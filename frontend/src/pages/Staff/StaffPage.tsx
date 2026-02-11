@@ -18,7 +18,7 @@ import {
   Users, Loader2, Briefcase, Clock, CalendarDays,
   ChevronLeft, ChevronRight, Plus, Trash2,
 } from 'lucide-react';
-import type { StaffSchedule, Shift, StaffProfile } from '@/types';
+import type { StaffSchedule, Shift } from '@/types';
 
 const departments = ['kitchen', 'service', 'management', 'bar', 'cleaning', 'delivery'];
 
@@ -46,17 +46,6 @@ const HOUR_START = 6;   // timeline starts at 06:00
 const HOUR_END = 24;    // timeline ends at 24:00 (midnight)
 const TOTAL_HOURS = HOUR_END - HOUR_START;
 const HOURS = Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => HOUR_START + i);
-
-const statusColors: Record<string, string> = {
-  scheduled: 'bg-blue-500',
-  confirmed: 'bg-green-500',
-  completed: 'bg-gray-400',
-  absent: 'bg-red-500',
-  sick: 'bg-orange-500',
-  vacation: 'bg-purple-500',
-  day_off: 'bg-gray-300',
-  swap_requested: 'bg-yellow-500',
-};
 
 /* ═══════════════════════════════════════════════════ */
 export function StaffPage() {
