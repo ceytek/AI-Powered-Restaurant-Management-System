@@ -235,7 +235,7 @@ async def create_reservation(
                 Customer.company_id == current_user.company_id,
                 Customer.phone == data.customer_phone,
                 Customer.is_active == True,
-            )
+            ).order_by(Customer.created_at.desc()).limit(1)
         )
         customer = cust_q.scalar_one_or_none()
 
@@ -246,7 +246,7 @@ async def create_reservation(
                 Customer.company_id == current_user.company_id,
                 Customer.email == data.customer_email,
                 Customer.is_active == True,
-            )
+            ).order_by(Customer.created_at.desc()).limit(1)
         )
         customer = cust_q.scalar_one_or_none()
 
