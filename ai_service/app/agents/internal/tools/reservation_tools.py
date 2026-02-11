@@ -1,5 +1,6 @@
 """Internal tools for reservation analytics and queries (read-only)."""
 import logging
+from datetime import date as date_type, datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -147,6 +148,12 @@ def create_internal_reservation_tools(db: AsyncSession, company_id: str):
             date: The date to query in YYYY-MM-DD format (e.g. '2026-02-12' for tomorrow).
         """
         try:
+            # Convert string date to date object for asyncpg compatibility
+            if isinstance(date, str):
+                target_date = datetime.strptime(date, "%Y-%m-%d").date()
+            else:
+                target_date = date
+
             result = await db.execute(text("""
                 SELECT r.reservation_number, r.customer_name, r.customer_phone,
                        r.date, r.start_time, r.end_time, r.party_size, r.status,
@@ -157,7 +164,7 @@ def create_internal_reservation_tools(db: AsyncSession, company_id: str):
                 WHERE r.company_id = :company_id
                   AND r.date = :target_date
                 ORDER BY r.start_time
-            """), {"company_id": company_id, "target_date": date})
+            """), {"company_id": company_id, "target_date": target_date})
 
             rows = result.fetchall()
             if not rows:
