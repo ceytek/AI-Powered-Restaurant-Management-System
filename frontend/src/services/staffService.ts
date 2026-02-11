@@ -53,4 +53,12 @@ export const staffService = {
     const { data } = await api.post<StaffSchedule>('/staff/schedules', payload);
     return data;
   },
+  updateSchedule: async (id: string, payload: Partial<{ shift_id: string; status: string; notes: string; section_id: string }>) => {
+    const { data } = await api.put<StaffSchedule>(`/staff/schedules/${id}`, payload);
+    return data;
+  },
+  deleteSchedule: async (id: string) => {
+    const { data } = await api.delete(`/staff/schedules/${id}`);
+    return data;
+  },
 };

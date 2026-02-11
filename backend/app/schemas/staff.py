@@ -172,12 +172,17 @@ class StaffScheduleResponse(BaseModel):
     staff_name: Optional[str] = None
     shift_id: Optional[UUID] = None
     shift_name: Optional[str] = None
+    shift_start_time: Optional[time] = None
+    shift_end_time: Optional[time] = None
+    shift_color: Optional[str] = None
     date: date
     custom_start_time: Optional[time] = None
     custom_end_time: Optional[time] = None
     status: str
     section_id: Optional[UUID] = None
     section_name: Optional[str] = None
+    department: Optional[str] = None
+    position_name: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime
 

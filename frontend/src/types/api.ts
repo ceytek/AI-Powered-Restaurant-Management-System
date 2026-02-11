@@ -330,9 +330,17 @@ export interface StaffSchedule {
   staff_name?: string;
   shift_id?: string;
   shift_name?: string;
+  shift_start_time?: string;
+  shift_end_time?: string;
+  shift_color?: string;
   date: string;
+  custom_start_time?: string;
+  custom_end_time?: string;
   status: string;
+  section_id?: string;
   section_name?: string;
+  department?: string;
+  position_name?: string;
   notes?: string;
   created_at: string;
 }

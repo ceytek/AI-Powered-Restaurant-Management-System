@@ -281,6 +281,7 @@ async def list_schedules(
 
     query = query.options(
         selectinload(StaffSchedule.staff).selectinload(StaffProfile.user),
+        selectinload(StaffSchedule.staff).selectinload(StaffProfile.position),
         selectinload(StaffSchedule.shift),
         selectinload(StaffSchedule.section),
     ).order_by(StaffSchedule.date, StaffSchedule.staff_id)
@@ -293,7 +294,12 @@ async def list_schedules(
         d = StaffScheduleResponse.model_validate(s).model_dump()
         d["staff_name"] = f"{s.staff.user.first_name} {s.staff.user.last_name}" if s.staff and s.staff.user else None
         d["shift_name"] = s.shift.name if s.shift else None
+        d["shift_start_time"] = s.shift.start_time if s.shift else None
+        d["shift_end_time"] = s.shift.end_time if s.shift else None
+        d["shift_color"] = s.shift.color if s.shift else None
         d["section_name"] = s.section.name if s.section else None
+        d["department"] = s.staff.position.department if s.staff and s.staff.position else None
+        d["position_name"] = s.staff.position.name if s.staff and s.staff.position else None
         response.append(StaffScheduleResponse(**d))
     return response
 
