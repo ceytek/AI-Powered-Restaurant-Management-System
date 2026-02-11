@@ -9,6 +9,7 @@ from app.core.database import engine
 from app.api.knowledge import router as knowledge_router
 from app.api.chat import router as chat_router
 from app.api.voice import router as voice_router
+from app.api.internal_chat import router as internal_chat_router
 
 # Configure logging
 logging.basicConfig(
@@ -60,6 +61,7 @@ app.add_middleware(
 app.include_router(knowledge_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(voice_router, prefix="/api")
+app.include_router(internal_chat_router, prefix="/api")
 
 
 # Health check

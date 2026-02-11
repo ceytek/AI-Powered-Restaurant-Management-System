@@ -13,6 +13,7 @@ import {
   Mic,
   Brain,
   ChevronLeft,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -74,6 +75,12 @@ const navItems = [
 ];
 
 const bottomNavItems = [
+  {
+    title: 'AI Assistant',
+    href: '/ai-assistant',
+    icon: Sparkles,
+    permission: 'dashboard.read',
+  },
   {
     title: 'Voice Agent',
     href: '/voice-simulator',

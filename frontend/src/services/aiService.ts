@@ -121,6 +121,30 @@ export interface SemanticSearchResponse {
   total: number;
 }
 
+/* ───────────── Internal Chat Types ───────────── */
+
+export interface InternalChatResponse {
+  response: string;
+  session_id: string;
+  tools_used: string[];
+  latency_ms: number;
+}
+
+export interface InternalSessionInfo {
+  session_id: string;
+  started_at: string | null;
+  last_message_at: string | null;
+  message_count: number;
+}
+
+export interface InternalMessageInfo {
+  role: string;
+  content: string;
+  tool_name: string | null;
+  latency_ms: number | null;
+  timestamp: string | null;
+}
+
 /* ═══════════════ AI SERVICE ═══════════════ */
 
 export const aiService = {
@@ -294,6 +318,38 @@ export const aiService = {
       { query, search_type: searchType, limit },
       { params: { company_id: companyId } },
     );
+    return data;
+  },
+
+  /* ═══════════ Internal Chat (JWT required) ═══════════ */
+
+  /** Send a message to the internal AI assistant */
+  internalChat: async (message: string, sessionId?: string): Promise<InternalChatResponse> => {
+    const token = localStorage.getItem('access_token');
+    const { data } = await aiApi.post<InternalChatResponse>(
+      '/internal-chat',
+      { message, session_id: sessionId },
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    return data;
+  },
+
+  /** List internal chat sessions */
+  listInternalSessions: async (limit = 20): Promise<InternalSessionInfo[]> => {
+    const token = localStorage.getItem('access_token');
+    const { data } = await aiApi.get<InternalSessionInfo[]>('/internal-chat/sessions', {
+      params: { limit },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return data;
+  },
+
+  /** Get internal session history */
+  getInternalSessionHistory: async (sessionId: string): Promise<InternalMessageInfo[]> => {
+    const token = localStorage.getItem('access_token');
+    const { data } = await aiApi.get<InternalMessageInfo[]>(`/internal-chat/sessions/${sessionId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     return data;
   },
 };
