@@ -128,8 +128,23 @@ def build_agent_graph(db, company_id: str, company_name: str):
         elif route == "information":
             return {"next_agent": "information"}
         elif route == "farewell":
+            # SAFETY: Never let the LLM hallucinate reservation confirmations in farewell.
+            # Check if the conversation actually has a confirmed reservation (RES- number in history).
+            conversation_text = " ".join(
+                m.content for m in state.get("messages", [])
+                if hasattr(m, "content") and isinstance(m.content, str)
+            )
+            has_confirmed_reservation = "RES-" in conversation_text and "confirmed" in conversation_text.lower()
+
+            if has_confirmed_reservation:
+                # Reservation was truly confirmed, allow contextual farewell
+                farewell_msg = message or "Thank you for calling! Have a wonderful day. Goodbye!"
+            else:
+                # No confirmed reservation — use GENERIC farewell only
+                farewell_msg = "Thank you for calling! Have a great day. Goodbye!"
+
             return {
-                "messages": [AIMessage(content=message or "Thank you for calling! Have a wonderful day. Goodbye!")],
+                "messages": [AIMessage(content=farewell_msg)],
                 "next_agent": "farewell",
                 "call_active": False,
             }
