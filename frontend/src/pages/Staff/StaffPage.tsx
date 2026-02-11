@@ -18,7 +18,7 @@ import {
   Users, Loader2, Briefcase, Clock, CalendarDays,
   ChevronLeft, ChevronRight, Plus, Trash2,
 } from 'lucide-react';
-import type { StaffSchedule, Shift } from '@/types';
+import type { StaffSchedule } from '@/types';
 
 const departments = ['kitchen', 'service', 'management', 'bar', 'cleaning', 'delivery'];
 
