@@ -17,7 +17,7 @@ export function CustomerSearch({ onSelect, onClear, selectedCustomer, placeholde
   const [results, setResults] = useState<CustomerBrief[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Debounced search

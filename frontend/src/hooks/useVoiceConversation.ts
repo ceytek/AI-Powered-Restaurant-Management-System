@@ -56,7 +56,7 @@ export interface VoiceConversationConfig {
 /* ───────── Helpers ───────── */
 
 /** Calculate RMS (Root Mean Square) energy from frequency data */
-function calcRMS(analyser: AnalyserNode, buf: Uint8Array): number {
+function calcRMS(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
   analyser.getByteTimeDomainData(buf);
   let sum = 0;
   for (let i = 0; i < buf.length; i++) {
@@ -89,7 +89,7 @@ export function useVoiceConversation(
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
