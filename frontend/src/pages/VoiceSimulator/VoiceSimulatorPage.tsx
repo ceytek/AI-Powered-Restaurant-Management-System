@@ -144,6 +144,158 @@ function LiveWaveform({ analyser, isActive }: { analyser: AnalyserNode | null; i
   return <canvas ref={canvasRef} width={280} height={50} className="w-full max-w-[280px]" />;
 }
 
+/* ──────────── Incoming Call Overlay ──────────── */
+function IncomingCallOverlay({
+  onAnswer,
+  onDecline,
+  restaurantName,
+}: {
+  onAnswer: () => void;
+  onDecline: () => void;
+  restaurantName: string;
+}) {
+  const callerProfiles = [
+    { name: 'Sarah Mitchell', phone: '+1 (212) 555-0187', avatar: 'SM', tags: ['Returning Guest', 'Regular'], visits: 12, avgSpent: 85.5 },
+    { name: 'James Rodriguez', phone: '+1 (646) 555-0234', avatar: 'JR', tags: ['VIP', 'High Spender', 'Regular'], visits: 28, avgSpent: 142.0 },
+    { name: 'Emily Chen', phone: '+1 (917) 555-0391', avatar: 'EC', tags: ['New Caller'], visits: 0, avgSpent: 0 },
+    { name: 'Michael Thompson', phone: '+1 (347) 555-0145', avatar: 'MT', tags: ['Returning Guest'], visits: 5, avgSpent: 67.0 },
+    { name: 'Unknown Caller', phone: '+1 (555) 019-2847', avatar: '?', tags: [], visits: 0, avgSpent: 0 },
+    { name: 'Olivia Parker', phone: '+1 (718) 555-0276', avatar: 'OP', tags: ['VIP', 'Birthday This Month'], visits: 18, avgSpent: 110.5 },
+  ];
+
+  const [caller] = useState(() => callerProfiles[Math.floor(Math.random() * callerProfiles.length)]);
+  const [ringCount, setRingCount] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setRingCount((p) => p + 1), 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const tagColors: Record<string, string> = {
+    'VIP': 'bg-amber-500/90 text-white',
+    'High Spender': 'bg-emerald-500/90 text-white',
+    'Regular': 'bg-blue-500/90 text-white',
+    'Returning Guest': 'bg-purple-500/90 text-white',
+    'New Caller': 'bg-slate-500/90 text-white',
+    'Birthday This Month': 'bg-pink-500/90 text-white',
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-300">
+      <div className="relative w-full max-w-sm mx-4">
+        {/* Ringing pulse behind card */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-80 h-80 rounded-full border-2 border-emerald-400/20 animate-ping" />
+          <div className="absolute w-96 h-96 rounded-full border border-emerald-400/10 animate-ping" style={{ animationDelay: '0.7s' }} />
+        </div>
+
+        {/* Card */}
+        <div className="relative bg-gradient-to-b from-slate-800 to-slate-900 rounded-3xl shadow-2xl shadow-black/50 overflow-hidden border border-white/10">
+          {/* Top glow */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent" />
+
+          {/* Content */}
+          <div className="px-6 pt-8 pb-6 text-center">
+            {/* Incoming Call Label */}
+            <p className="text-emerald-400 text-xs font-medium tracking-widest uppercase mb-6 animate-pulse">
+              Incoming Call
+            </p>
+
+            {/* Avatar */}
+            <div className="relative mx-auto w-24 h-24 mb-5">
+              <div className="absolute inset-0 rounded-full bg-gradient-to-br from-emerald-400 to-blue-500 animate-pulse" />
+              <div className="absolute inset-[3px] rounded-full bg-slate-700 flex items-center justify-center">
+                {caller.avatar === '?' ? (
+                  <User className="h-10 w-10 text-slate-400" />
+                ) : (
+                  <span className="text-2xl font-bold text-white">{caller.avatar}</span>
+                )}
+              </div>
+              {/* Online indicator */}
+              <div className="absolute bottom-0 right-0 w-6 h-6 bg-emerald-500 rounded-full border-4 border-slate-800 animate-pulse" />
+            </div>
+
+            {/* Name */}
+            <h2 className="text-white text-xl font-bold mb-1">{caller.name}</h2>
+            <p className="text-slate-400 text-sm mb-4">{caller.phone}</p>
+
+            {/* Tags */}
+            {caller.tags.length > 0 && (
+              <div className="flex flex-wrap justify-center gap-2 mb-5">
+                {caller.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className={cn(
+                      'px-3 py-1 rounded-full text-[11px] font-semibold',
+                      tagColors[tag] || 'bg-slate-600 text-white',
+                    )}
+                  >
+                    {tag}
+                  </span>
+                ))}
+                {caller.visits > 0 && (
+                  <span className="px-3 py-1 rounded-full text-[11px] font-semibold bg-slate-600/80 text-white">
+                    {caller.visits} visits
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Stats Row */}
+            {caller.visits > 0 && (
+              <div className="grid grid-cols-3 gap-3 mb-6 px-2">
+                <div className="bg-slate-700/50 rounded-xl py-2.5 px-2">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Visits</p>
+                  <p className="text-white font-bold text-sm">{caller.visits}</p>
+                </div>
+                <div className="bg-slate-700/50 rounded-xl py-2.5 px-2">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Avg Spent</p>
+                  <p className="text-white font-bold text-sm">${caller.avgSpent.toFixed(0)}</p>
+                </div>
+                <div className="bg-slate-700/50 rounded-xl py-2.5 px-2">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Ring</p>
+                  <p className="text-white font-bold text-sm">{ringCount}s</p>
+                </div>
+              </div>
+            )}
+
+            {/* Calling to */}
+            <p className="text-slate-500 text-[11px] mb-6">
+              Calling → <span className="text-slate-300">{restaurantName}</span>
+            </p>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-center gap-8">
+              {/* Decline */}
+              <div className="text-center">
+                <button
+                  onClick={onDecline}
+                  className="w-16 h-16 rounded-full bg-gradient-to-br from-red-500 to-red-700 text-white flex items-center justify-center shadow-lg shadow-red-900/40 hover:scale-105 active:scale-95 transition-all"
+                >
+                  <PhoneOff className="h-7 w-7" />
+                </button>
+                <p className="text-slate-400 text-[11px] mt-2 font-medium">Decline</p>
+              </div>
+
+              {/* Answer */}
+              <div className="text-center">
+                <button
+                  onClick={onAnswer}
+                  className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-900/40 hover:scale-105 active:scale-95 transition-all animate-bounce"
+                  style={{ animationDuration: '1.5s' }}
+                >
+                  <Phone className="h-7 w-7" />
+                </button>
+                <p className="text-slate-300 text-[11px] mt-2 font-medium">Answer</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ──────────── Pulsating Rings ──────────── */
 function PulseRings({ color = 'green' }: { color?: string }) {
   const colorMap: Record<string, string> = {
@@ -188,6 +340,10 @@ function ConversationStatePill({ state }: { state: ConversationState }) {
 export function VoiceSimulatorPage() {
   const { company } = useAuthStore();
   const companyId = company?.id || '';
+
+  /* ─── Incoming Call State ─── */
+  const [showIncomingCall, setShowIncomingCall] = useState(false);
+  const incomingCallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ─── Call State ─── */
   const [isInCall, setIsInCall] = useState(false);
@@ -313,6 +469,18 @@ export function VoiceSimulatorPage() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isInCall, isRinging]);
+
+  /* ─── Auto-show incoming call after 2 seconds ─── */
+  useEffect(() => {
+    if (!isInCall && messages.length === 0) {
+      incomingCallTimerRef.current = setTimeout(() => {
+        setShowIncomingCall(true);
+      }, 2000);
+    }
+    return () => {
+      if (incomingCallTimerRef.current) clearTimeout(incomingCallTimerRef.current);
+    };
+  }, []); // Only on initial mount
 
   /* ─── Cleanup on unmount ─── */
   useEffect(() => {
@@ -598,6 +766,7 @@ export function VoiceSimulatorPage() {
 
   /* ────────────────── Call Actions ────────────────── */
   const handleStartCall = useCallback(() => {
+    setShowIncomingCall(false);
     setIsInCall(true);
     setIsRinging(true);
     setMessages([]);
@@ -607,6 +776,10 @@ export function VoiceSimulatorPage() {
     greetingPlayedRef.current = false;
     setTimeout(() => startCallMutation.mutate(), 1500);
   }, [companyId]);
+
+  const handleDeclineCall = useCallback(() => {
+    setShowIncomingCall(false);
+  }, []);
 
   const handleEndCall = useCallback(() => {
     setIsInCall(false);
@@ -1387,6 +1560,15 @@ export function VoiceSimulatorPage() {
           </Card>
         </div>
       </div>
+
+      {/* ═══════ Incoming Call Overlay ═══════ */}
+      {showIncomingCall && (
+        <IncomingCallOverlay
+          onAnswer={handleStartCall}
+          onDecline={handleDeclineCall}
+          restaurantName={company?.name || 'Restaurant'}
+        />
+      )}
 
       {/* ═══════ History Dialog ═══════ */}
       <Dialog open={showHistory} onOpenChange={setShowHistory}>
