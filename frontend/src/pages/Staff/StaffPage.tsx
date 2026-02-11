@@ -450,7 +450,6 @@ export function StaffPage() {
             <DayTimeline
               date={dateRange[0]}
               staffByDept={staffInSchedule}
-              allShifts={allShifts}
               onDelete={(id) => deleteSchedMutation.mutate(id)}
             />
           ) : (
@@ -458,7 +457,6 @@ export function StaffPage() {
             <WeekGrid
               days={dateRange}
               staffByDept={staffInSchedule}
-              allShifts={allShifts}
               onDelete={(id) => deleteSchedMutation.mutate(id)}
             />
           )}
@@ -616,11 +614,10 @@ export function StaffPage() {
 interface TimelineProps {
   date: Date;
   staffByDept: Record<string, { id: string; name: string; dept: string; pos: string; schedules: StaffSchedule[] }[]>;
-  allShifts: Shift[];
   onDelete: (id: string) => void;
 }
 
-function DayTimeline({ date, staffByDept, allShifts, onDelete }: TimelineProps) {
+function DayTimeline({ date, staffByDept, onDelete }: TimelineProps) {
   const dateStr = formatDate(date);
   const sortedDepts = Object.keys(staffByDept).sort();
 
@@ -770,7 +767,6 @@ function DayTimeline({ date, staffByDept, allShifts, onDelete }: TimelineProps) 
 interface WeekGridProps {
   days: Date[];
   staffByDept: Record<string, { id: string; name: string; dept: string; pos: string; schedules: StaffSchedule[] }[]>;
-  allShifts: Shift[];
   onDelete: (id: string) => void;
 }
 
