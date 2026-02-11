@@ -20,7 +20,8 @@ def create_inventory_tools(db: AsyncSession, company_id: str):
         """
         try:
             result = await db.execute(text("""
-                SELECT i.name, i.current_stock, i.minimum_stock, i.unit,
+                SELECT i.name, i.current_stock, i.minimum_stock,
+                       COALESCE(uom.abbreviation, uom.name, 'units') as unit_name,
                        ic.name as category_name,
                        CASE WHEN i.minimum_stock > 0
                             THEN ROUND((i.current_stock::numeric / i.minimum_stock::numeric) * 100)
@@ -28,6 +29,7 @@ def create_inventory_tools(db: AsyncSession, company_id: str):
                        END as stock_pct
                 FROM inventory_items i
                 LEFT JOIN inventory_categories ic ON i.category_id = ic.id
+                LEFT JOIN units_of_measure uom ON i.unit_id = uom.id
                 WHERE i.company_id = :company_id
                   AND i.is_active = true
                   AND i.minimum_stock > 0
@@ -44,7 +46,7 @@ def create_inventory_tools(db: AsyncSession, company_id: str):
                 status = "🔴 CRITICAL" if r.stock_pct <= 25 else "🟡 LOW"
                 lines.append(
                     f"  {status} {r.name} ({r.category_name or 'Uncategorized'}): "
-                    f"{r.current_stock} / {r.minimum_stock} {r.unit or 'units'} ({r.stock_pct}%)"
+                    f"{r.current_stock} / {r.minimum_stock} {r.unit_name} ({r.stock_pct}%)"
                 )
             return "\n".join(lines)
         except Exception as e:
@@ -111,10 +113,12 @@ def create_inventory_tools(db: AsyncSession, company_id: str):
         try:
             result = await db.execute(text("""
                 SELECT i.name, i.sku, i.current_stock, i.minimum_stock, i.maximum_stock,
-                       i.unit, i.unit_cost, i.reorder_point, i.reorder_quantity,
+                       COALESCE(uom.abbreviation, uom.name, 'units') as unit_name,
+                       i.unit_cost, i.reorder_point, i.reorder_quantity,
                        ic.name as category_name, i.is_active
                 FROM inventory_items i
                 LEFT JOIN inventory_categories ic ON i.category_id = ic.id
+                LEFT JOIN units_of_measure uom ON i.unit_id = uom.id
                 WHERE i.company_id = :company_id
                   AND i.name ILIKE :query
                 ORDER BY i.name
@@ -131,7 +135,7 @@ def create_inventory_tools(db: AsyncSession, company_id: str):
                 lines.append(
                     f"📦 {r.name} (SKU: {r.sku or 'N/A'})\n"
                     f"   Category: {r.category_name or 'Uncategorized'}\n"
-                    f"   Stock: {r.current_stock} / {r.minimum_stock} {r.unit or 'units'} ({stock_pct}%)\n"
+                    f"   Stock: {r.current_stock} / {r.minimum_stock} {r.unit_name} ({stock_pct}%)\n"
                     f"   Unit Cost: ${float(r.unit_cost):,.2f}\n"
                     f"   Reorder Point: {r.reorder_point or 'N/A'} | Reorder Qty: {r.reorder_quantity or 'N/A'}\n"
                     f"   Status: {'Active' if r.is_active else 'Inactive'}"

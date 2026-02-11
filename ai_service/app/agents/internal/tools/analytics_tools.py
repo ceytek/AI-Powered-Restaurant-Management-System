@@ -27,7 +27,7 @@ def create_analytics_tools(db: AsyncSession, company_id: str):
                        mi.is_vegetarian, mi.is_vegan, mi.is_spicy
                 FROM menu_items mi
                 LEFT JOIN menu_categories mc ON mi.category_id = mc.id
-                WHERE mi.company_id = :company_id AND mi.is_active = true
+                WHERE mi.company_id = :company_id AND mi.is_available = true
                 ORDER BY mi.is_featured DESC, mi.price DESC
                 LIMIT :limit
             """), {"company_id": company_id, "limit": limit})
@@ -205,7 +205,7 @@ def create_analytics_tools(db: AsyncSession, company_id: str):
             staff = await db.execute(text("""
                 SELECT COUNT(*) as active_staff
                 FROM staff_profiles
-                WHERE company_id = :company_id AND is_active = true
+                WHERE company_id = :company_id AND employment_status = 'active'
             """), {"company_id": company_id})
             s = staff.fetchone()
 
