@@ -72,7 +72,7 @@ def create_analytics_tools(db: AsyncSession, company_id: str):
             result = await db.execute(text("""
                 SELECT
                     COUNT(*) as total,
-                    COUNT(*) FILTER (WHERE is_vip = true) as vip_count,
+                    COUNT(*) FILTER (WHERE vip_status = true) as vip_count,
                     COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '30 days') as new_30d,
                     COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '7 days') as new_7d,
                     COUNT(*) FILTER (WHERE is_blacklisted = true) as blacklisted
@@ -85,7 +85,7 @@ def create_analytics_tools(db: AsyncSession, company_id: str):
             # Top customers by visit count
             top = await db.execute(text("""
                 SELECT first_name, last_name, total_visits, total_spent,
-                       is_vip, preferred_language
+                       vip_status, customer_tier
                 FROM customers
                 WHERE company_id = :company_id AND is_active = true
                 ORDER BY total_visits DESC
@@ -102,14 +102,68 @@ def create_analytics_tools(db: AsyncSession, company_id: str):
             if top_rows:
                 lines.append("\n  🏆 TOP CUSTOMERS (by visits):")
                 for c in top_rows:
-                    vip = " ⭐" if c.is_vip else ""
+                    vip = " ⭐" if c.vip_status else ""
+                    tier = f" [{c.customer_tier}]" if c.customer_tier and c.customer_tier != "regular" else ""
                     spent = f" | Spent: ${float(c.total_spent):,.2f}" if c.total_spent else ""
-                    lines.append(f"    • {c.first_name} {c.last_name}{vip}: {c.total_visits} visits{spent}")
+                    lines.append(f"    • {c.first_name} {c.last_name}{vip}{tier}: {c.total_visits} visits{spent}")
 
             return "\n".join(lines)
         except Exception as e:
             logger.error(f"get_customer_stats error: {e}")
             return f"Error fetching customer stats: {str(e)}"
+
+    @tool
+    async def search_customer(query: str) -> str:
+        """Search for a customer by name, phone number, or email.
+
+        Args:
+            query: Customer name, phone, or email to search for.
+        """
+        try:
+            result = await db.execute(text("""
+                SELECT first_name, last_name, phone, email,
+                       vip_status, customer_tier, total_visits, total_spent,
+                       last_visit_date, is_blacklisted, is_active,
+                       seating_preference, notes
+                FROM customers
+                WHERE company_id = :company_id
+                  AND (
+                      first_name ILIKE :q
+                      OR last_name ILIKE :q
+                      OR phone ILIKE :q
+                      OR email ILIKE :q
+                      OR (first_name || ' ' || COALESCE(last_name, '')) ILIKE :q
+                  )
+                ORDER BY total_visits DESC
+                LIMIT 10
+            """), {"company_id": company_id, "q": f"%{query}%"})
+
+            rows = result.fetchall()
+            if not rows:
+                return f"No customers found matching '{query}'."
+
+            lines = [f"👤 CUSTOMERS MATCHING '{query}' ({len(rows)} found):\n"]
+            for c in rows:
+                name = f"{c.first_name} {c.last_name or ''}".strip()
+                vip = " ⭐ VIP" if c.vip_status else ""
+                tier = f" [{c.customer_tier}]" if c.customer_tier and c.customer_tier != "regular" else ""
+                blacklisted = " 🚫 BLACKLISTED" if c.is_blacklisted else ""
+                inactive = " (inactive)" if not c.is_active else ""
+                phone = f" | 📞 {c.phone}" if c.phone else ""
+                email = f" | ✉️ {c.email}" if c.email else ""
+                visits = f" | Visits: {c.total_visits}"
+                spent = f" | Spent: ${float(c.total_spent):,.2f}" if c.total_spent else ""
+                last_visit = f" | Last: {c.last_visit_date.strftime('%m/%d/%Y')}" if c.last_visit_date else ""
+                pref = f"\n     Seating: {c.seating_preference}" if c.seating_preference else ""
+                note = f"\n     Note: {c.notes[:100]}..." if c.notes and len(c.notes) > 100 else (f"\n     Note: {c.notes}" if c.notes else "")
+
+                lines.append(
+                    f"  • {name}{vip}{tier}{blacklisted}{inactive}{phone}{email}{visits}{spent}{last_visit}{pref}{note}"
+                )
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"search_customer error: {e}")
+            return f"Error searching customers: {str(e)}"
 
     @tool
     async def get_daily_overview() -> str:
@@ -176,4 +230,4 @@ def create_analytics_tools(db: AsyncSession, company_id: str):
             logger.error(f"get_daily_overview error: {e}")
             return f"Error fetching daily overview: {str(e)}"
 
-    return [get_popular_menu_items, get_customer_stats, get_daily_overview]
+    return [get_popular_menu_items, get_customer_stats, search_customer, get_daily_overview]
