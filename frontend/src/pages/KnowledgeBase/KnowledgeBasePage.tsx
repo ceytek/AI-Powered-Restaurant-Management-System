@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { aiService } from '@/services/aiService';
-import type { KnowledgeCategory, KnowledgeEntry, SyncStatus } from '@/services/aiService';
+import type { KnowledgeEntry } from '@/services/aiService';
 import { useAuthStore } from '@/store/authStore';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -220,21 +220,17 @@ export function KnowledgeBasePage() {
     <div className="space-y-6">
       <PageHeader
         title="Knowledge Base"
-        description="Manage AI agent knowledge, FAQ, and semantic search"
-        icon={Brain}
-        action={
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setShowSearch(true)}>
-              <Sparkles className="h-4 w-4 mr-2" />
-              Semantic Search
-            </Button>
-            <Button onClick={() => setShowCreateEntry(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Entry
-            </Button>
-          </div>
-        }
-      />
+        subtitle="Manage AI agent knowledge, FAQ, and semantic search"
+      >
+        <Button variant="outline" onClick={() => setShowSearch(true)}>
+          <Sparkles className="h-4 w-4 mr-2" />
+          Semantic Search
+        </Button>
+        <Button onClick={() => setShowCreateEntry(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Entry
+        </Button>
+      </PageHeader>
 
       {/* Sync Status Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

@@ -18,7 +18,7 @@ import {
   FolderPlus, TrendingDown, DollarSign, Box, Truck, RefreshCw,
   Trash2, Eye, Edit, AlertCircle, BarChart3, ShoppingCart,
 } from 'lucide-react';
-import type { InventoryItem, InventoryCategory, StockMovement, Supplier } from '@/types';
+import type { InventoryItem } from '@/types';
 
 const movementTypeConfig: Record<string, { label: string; color: string; icon: typeof ArrowDownCircle }> = {
   purchase: { label: 'Purchase (In)', color: 'bg-green-50 text-green-700', icon: ArrowDownCircle },
@@ -349,7 +349,7 @@ export function InventoryPage() {
                   </TableHeader>
                   <TableBody>
                     {items.map((item) => {
-                      const stockPct = item.minimum_stock > 0
+                      const stockPct = Number(item.minimum_stock) > 0
                         ? Math.round(Number(item.current_stock) / Number(item.minimum_stock) * 100)
                         : 100;
                       const isCritical = stockPct <= 25;
