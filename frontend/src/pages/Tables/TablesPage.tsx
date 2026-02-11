@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { tableService, type TableAvailability, type TableReservationInfo } from '@/services/tableService';
+import { tableService, type TableAvailability } from '@/services/tableService';
 import { PageHeader } from '@/components/common/PageHeader';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -373,7 +373,7 @@ export function TablesPage() {
         viewMode === 'grid' ? (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {filteredAvailability.map((table) => (
-              <AvailabilityCard key={table.id} table={table} filterTime={filterTime} />
+              <AvailabilityCard key={table.id} table={table} />
             ))}
             {filteredAvailability.length === 0 && (
               <div className="col-span-full flex flex-col items-center py-12 text-muted-foreground">
@@ -642,7 +642,7 @@ function TableCard({ table, sectionColor, onStatusChange }: { table: RestaurantT
 }
 
 /* ═══════════════ Availability Table Card ═══════════════ */
-function AvailabilityCard({ table, filterTime }: { table: TableAvailability; filterTime: string }) {
+function AvailabilityCard({ table }: { table: TableAvailability }) {
   const isReserved = table.is_reserved_at_time;
   const cur = table.current_reservation;
   const hasAnyReservations = table.reservation_count > 0;
