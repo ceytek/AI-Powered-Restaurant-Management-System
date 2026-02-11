@@ -41,8 +41,3 @@ export interface LoginResponse {
   company: CompanyResponse;
   tokens: TokenResponse;
 }
-
-export interface MessageResponse {
-  message: string;
-  success: boolean;
-}

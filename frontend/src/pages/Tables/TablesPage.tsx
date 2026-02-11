@@ -10,12 +10,11 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Armchair, Grid3X3, List, Loader2 } from 'lucide-react';
-import type { RestaurantTable, TableSection, TableStatus } from '@/types';
+import type { RestaurantTable, TableStatus } from '@/types';
 
 const statusOptions: { value: TableStatus; label: string }[] = [
   { value: 'available', label: 'Available' },
@@ -24,14 +23,6 @@ const statusOptions: { value: TableStatus; label: string }[] = [
   { value: 'maintenance', label: 'Maintenance' },
   { value: 'cleaning', label: 'Cleaning' },
 ];
-
-const statusColorMap: Record<string, string> = {
-  available: 'bg-green-500',
-  occupied: 'bg-red-500',
-  reserved: 'bg-blue-500',
-  maintenance: 'bg-gray-400',
-  cleaning: 'bg-yellow-500',
-};
 
 export function TablesPage() {
   const queryClient = useQueryClient();

@@ -210,7 +210,7 @@ export function VoiceSimulatorPage() {
 
   /* ─── Push-to-Talk refs ─── */
   const [isRecording, setIsRecording] = useState(false);
-  const [isPlayingPTT, setIsPlayingPTT] = useState(false);
+  const [, setIsPlayingPTT] = useState(false);
   const [isSpeakingPTT, setIsSpeakingPTT] = useState(false);
   const pttRecorderRef = useRef<MediaRecorder | null>(null);
   const pttChunksRef = useRef<Blob[]>([]);
