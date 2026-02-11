@@ -55,7 +55,7 @@ export function StaffPage() {
   const [showCreatePosition, setShowCreatePosition] = useState(false);
   const [showCreateShift, setShowCreateShift] = useState(false);
   const [showAssignSchedule, setShowAssignSchedule] = useState(false);
-  const [activeTab, setActiveTab] = useState('staff');
+  const [activeTab, setActiveTab] = useState('schedule');
 
   /* ─── date state for schedule ─── */
   const [viewMode, setViewMode] = useState<'day' | 'week'>('week');
@@ -270,12 +270,12 @@ export function StaffPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="staff">Staff Members</TabsTrigger>
-          <TabsTrigger value="positions">Positions ({allPositions.length})</TabsTrigger>
-          <TabsTrigger value="shifts">Shifts ({allShifts.length})</TabsTrigger>
           <TabsTrigger value="schedule">
             <CalendarDays className="h-4 w-4 mr-1" />Schedule
           </TabsTrigger>
+          <TabsTrigger value="staff">Staff Members</TabsTrigger>
+          <TabsTrigger value="positions">Positions ({allPositions.length})</TabsTrigger>
+          <TabsTrigger value="shifts">Shifts ({allShifts.length})</TabsTrigger>
         </TabsList>
 
         {/* ════════════ Staff Members Tab ════════════ */}
