@@ -133,9 +133,12 @@ export function TablesPage() {
       ) : viewMode === 'grid' ? (
         /* Grid View */
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-          {tables.map((table) => (
-            <TableCard key={table.id} table={table} onStatusChange={(status) => statusMutation.mutate({ id: table.id, status })} />
-          ))}
+          {tables.map((table) => {
+            const sectionColor = sections.find((s) => s.id === table.section_id)?.color;
+            return (
+              <TableCard key={table.id} table={table} sectionColor={sectionColor} onStatusChange={(status) => statusMutation.mutate({ id: table.id, status })} />
+            );
+          })}
           {tables.length === 0 && (
             <div className="col-span-full flex flex-col items-center py-12 text-muted-foreground">
               <Armchair className="h-12 w-12 mb-3 opacity-30" />
@@ -280,10 +283,10 @@ export function TablesPage() {
   );
 }
 
-function TableCard({ table, onStatusChange }: { table: RestaurantTable; onStatusChange: (status: string) => void }) {
+function TableCard({ table, sectionColor, onStatusChange }: { table: RestaurantTable; sectionColor?: string; onStatusChange: (status: string) => void }) {
   return (
     <Card className="relative overflow-hidden hover:shadow-md transition-shadow cursor-pointer group">
-      <div className={`absolute top-0 left-0 right-0 h-1 ${statusColorMap[table.status] || 'bg-gray-300'}`} />
+      <div className="absolute top-0 left-0 right-0 h-1.5" style={{ backgroundColor: sectionColor || '#9CA3AF' }} />
       <CardContent className="pt-5 pb-3 px-4">
         <div className="text-center space-y-2">
           <div className="flex items-center justify-center">
