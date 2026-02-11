@@ -1,6 +1,34 @@
 import api from './api';
 import type { PaginatedResponse, MessageResponse, TableSection, TableSectionCreate, RestaurantTable, TableCreate, TableBrief } from '@/types';
 
+export interface TableReservationInfo {
+  reservation_number: string;
+  customer_name: string;
+  customer_phone?: string;
+  party_size: number;
+  start_time: string;
+  end_time?: string;
+  status: string;
+  special_requests?: string;
+}
+
+export interface TableAvailability {
+  id: string;
+  table_number: string;
+  name?: string;
+  capacity_min: number;
+  capacity_max: number;
+  shape: string;
+  status: string;
+  section_id?: string;
+  section_name?: string;
+  section_color?: string;
+  is_reserved_at_time: boolean;
+  current_reservation?: TableReservationInfo;
+  reservations: TableReservationInfo[];
+  reservation_count: number;
+}
+
 export const tableService = {
   // Sections
   getSections: async (params?: { search?: string; is_active?: boolean }) => {
@@ -43,6 +71,12 @@ export const tableService = {
   },
   deleteTable: async (id: string) => {
     const { data } = await api.delete<MessageResponse>(`/tables/${id}`);
+    return data;
+  },
+
+  // Availability with reservations
+  getTableAvailability: async (params: { date: string; time?: string }) => {
+    const { data } = await api.get<TableAvailability[]>('/tables/availability', { params });
     return data;
   },
 };

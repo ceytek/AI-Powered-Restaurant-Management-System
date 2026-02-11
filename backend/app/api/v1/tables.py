@@ -5,11 +5,13 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import Optional
 from uuid import UUID
+from datetime import date, time
 import math
 
 from app.core.database import get_db
 from app.middleware.auth import get_current_user, require_permissions, CurrentUser
 from app.models.restaurant import TableSection, Table, OperatingHours, SpecialHours
+from app.models.reservation import Reservation
 from app.schemas.restaurant import (
     TableSectionCreate, TableSectionUpdate, TableSectionResponse,
     TableCreate, TableUpdate, TableStatusUpdate, TableResponse, TableBriefResponse,
@@ -236,6 +238,122 @@ async def create_table(
     await audit.log_create("table", table.id, data.model_dump(), entity_name=f"Table {table.table_number}", request=request)
 
     return TableResponse.model_validate(table)
+
+
+# ==================== Table Availability with Reservations ====================
+
+@router.get("/availability")
+async def get_table_availability(
+    filter_date: date = Query(..., alias="date", description="Date to check (YYYY-MM-DD)"),
+    filter_time: Optional[time] = Query(None, alias="time", description="Time to check (HH:MM)"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Get all tables with reservation info for a given date/time.
+    Returns each table with its reservations for that date.
+    If time is provided, marks whether the table is reserved at that specific time.
+    """
+    from datetime import datetime as dt_cls, timedelta
+
+    # 1) Get all active tables
+    table_q = (
+        select(Table)
+        .where(Table.company_id == current_user.company_id, Table.is_active == True)
+        .options(selectinload(Table.section))
+        .order_by(Table.table_number)
+    )
+    table_result = await db.execute(table_q)
+    all_tables = table_result.scalars().all()
+
+    # 2) Get reservations for this date (exclude cancelled/no_show)
+    active_statuses = ["pending", "confirmed", "reminder_sent", "checked_in", "seated"]
+    res_q = (
+        select(Reservation)
+        .where(
+            Reservation.company_id == current_user.company_id,
+            Reservation.date == filter_date,
+            Reservation.status.in_(active_statuses),
+            Reservation.table_id.isnot(None),
+        )
+        .order_by(Reservation.start_time)
+    )
+    res_result = await db.execute(res_q)
+    reservations = res_result.scalars().all()
+
+    # 3) Group reservations by table_id
+    table_reservations: dict[UUID, list] = {}
+    for r in reservations:
+        table_reservations.setdefault(r.table_id, []).append(r)
+
+    # 4) Build response
+    result = []
+    for t in all_tables:
+        t_reservations = table_reservations.get(t.id, [])
+
+        # Check if reserved at the specific time
+        reserved_now = False
+        current_reservation = None
+        if filter_time and t_reservations:
+            for r in t_reservations:
+                r_start = r.start_time
+                r_end = r.end_time
+                if not r_end:
+                    combined = dt_cls.combine(filter_date, r_start) + timedelta(minutes=r.duration_minutes or 90)
+                    r_end = combined.time()
+
+                if r_start <= filter_time < r_end:
+                    reserved_now = True
+                    current_reservation = r
+                    break
+
+        # Build reservation list for this table on this date
+        reservations_list = []
+        for r in t_reservations:
+            r_end = r.end_time
+            if not r_end:
+                combined = dt_cls.combine(filter_date, r.start_time) + timedelta(minutes=r.duration_minutes or 90)
+                r_end = combined.time()
+
+            reservations_list.append({
+                "reservation_number": r.reservation_number,
+                "customer_name": r.customer_name,
+                "customer_phone": r.customer_phone,
+                "party_size": r.party_size,
+                "start_time": r.start_time.strftime("%H:%M"),
+                "end_time": r_end.strftime("%H:%M") if r_end else None,
+                "status": r.status,
+                "special_requests": r.special_requests,
+            })
+
+        table_item = {
+            "id": str(t.id),
+            "table_number": t.table_number,
+            "name": t.name,
+            "capacity_min": t.capacity_min,
+            "capacity_max": t.capacity_max,
+            "shape": t.shape,
+            "status": t.status,
+            "section_id": str(t.section_id) if t.section_id else None,
+            "section_name": t.section.name if t.section else None,
+            "section_color": t.section.color if t.section else None,
+            "is_reserved_at_time": reserved_now,
+            "current_reservation": {
+                "reservation_number": current_reservation.reservation_number,
+                "customer_name": current_reservation.customer_name,
+                "customer_phone": current_reservation.customer_phone,
+                "party_size": current_reservation.party_size,
+                "start_time": current_reservation.start_time.strftime("%H:%M"),
+                "end_time": (current_reservation.end_time.strftime("%H:%M") if current_reservation.end_time else None),
+                "status": current_reservation.status,
+                "special_requests": current_reservation.special_requests,
+            } if current_reservation else None,
+            "reservations": reservations_list,
+            "reservation_count": len(reservations_list),
+        }
+        result.append(table_item)
+
+    return result
 
 
 @router.get("/{table_id}", response_model=TableResponse)
