@@ -56,19 +56,29 @@ async def list_categories(
         )
         count_r = await db.execute(count_q)
 
-        # Load children
+        # Load children explicitly (avoid lazy-load MissingGreenlet)
         child_q = select(MenuCategory).where(
             MenuCategory.parent_id == cat.id, MenuCategory.company_id == current_user.company_id
         )
         if not include_inactive:
             child_q = child_q.where(MenuCategory.is_active == True)
         child_r = await db.execute(child_q.order_by(MenuCategory.sort_order))
-        children = [MenuCategoryResponse.model_validate(c) for c in child_r.scalars().all()]
+        children = []
+        for child in child_r.scalars().all():
+            children.append(MenuCategoryResponse(
+                id=child.id, parent_id=child.parent_id, name=child.name,
+                description=child.description, image_url=child.image_url,
+                sort_order=child.sort_order, is_active=child.is_active,
+                item_count=0, children=[], created_at=child.created_at,
+            ))
 
-        item_dict = MenuCategoryResponse.model_validate(cat).model_dump()
-        item_dict["item_count"] = count_r.scalar()
-        item_dict["children"] = children
-        response.append(MenuCategoryResponse(**item_dict))
+        response.append(MenuCategoryResponse(
+            id=cat.id, parent_id=cat.parent_id, name=cat.name,
+            description=cat.description, image_url=cat.image_url,
+            sort_order=cat.sort_order, is_active=cat.is_active,
+            item_count=count_r.scalar() or 0, children=children,
+            created_at=cat.created_at,
+        ))
 
     return response
 
