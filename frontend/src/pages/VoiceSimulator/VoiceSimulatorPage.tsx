@@ -395,7 +395,9 @@ export function VoiceSimulatorPage() {
       ttsEnabled,
       speechThreshold,
       silenceDurationMs: silenceDuration,
-      minSpeechMs: 400,
+      minSpeechMs: 500,
+      noiseMultiplierOnset: 3.0,
+      noiseMultiplierOffset: 1.8,
     },
     {
       onSessionId: (id) => setSessionId(id),
