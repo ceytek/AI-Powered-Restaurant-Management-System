@@ -1346,12 +1346,20 @@ export function VoiceSimulatorPage() {
                         {voiceConv.isIdle && 'Microphone initializing...'}
                       </p>
 
-                      {/* Noise floor indicator (shown in listening states) */}
-                      {(voiceConv.isListening || voiceConv.isUserSpeaking || voiceConv.isCalibrating) && voiceConv.noiseFloor > 0 && (
-                        <div className="flex items-center gap-3 text-[10px] text-muted-foreground/70 font-mono">
-                          <span>Noise: {voiceConv.noiseFloor.toFixed(4)}</span>
-                          <span>Threshold: {voiceConv.dynamicThreshold.toFixed(4)}</span>
-                          <span>Level: {voiceConv.audioLevel.toFixed(4)}</span>
+                      {/* VAD Debug Indicators */}
+                      {(voiceConv.isListening || voiceConv.isUserSpeaking || voiceConv.isCalibrating) && (
+                        <div className="flex flex-col items-center gap-1">
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground/70 font-mono">
+                            <span>Noise: {voiceConv.noiseFloor.toFixed(4)}</span>
+                            <span>Onset: {voiceConv.dynamicThreshold.toFixed(4)}</span>
+                            <span>Level: {voiceConv.audioLevel.toFixed(4)}</span>
+                          </div>
+                          <div className="flex items-center gap-3 text-[10px] text-muted-foreground/50 font-mono">
+                            <span>Band: {(voiceConv.speechBandRatio * 100).toFixed(0)}%</span>
+                            <span className={voiceConv.speechBandRatio >= 0.22 && voiceConv.audioLevel > voiceConv.dynamicThreshold ? 'text-emerald-500 font-bold' : ''}>
+                              {voiceConv.speechBandRatio >= 0.22 && voiceConv.audioLevel > voiceConv.dynamicThreshold ? '🗣 Speech' : voiceConv.audioLevel > voiceConv.noiseFloor * 1.5 ? '🎵 Ambient' : '🔇 Quiet'}
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>

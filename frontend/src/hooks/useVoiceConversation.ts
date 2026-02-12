@@ -1,21 +1,25 @@
 /**
- * useVoiceConversation — Robust Adaptive VAD + Turn-Taking
+ * useVoiceConversation — Production-grade VAD + Turn-Taking
  *
- * States:
+ * STATES:
  *   IDLE           → Not in a call
- *   CALIBRATING    → Measuring ambient noise level (~1.5s)
- *   LISTENING      → Mic live, waiting for user speech
- *   USER_SPEAKING  → VAD detected speech, recording audio
- *   PROCESSING     → Speech ended, audio sent to backend
- *   AGENT_SPEAKING → TTS playing agent response
+ *   CALIBRATING    → Measuring ambient noise (~1.5s)
+ *   LISTENING      → Mic live, waiting for speech
+ *   USER_SPEAKING  → Detected speech, recording
+ *   PROCESSING     → Speech ended, sending to backend
+ *   AGENT_SPEAKING → Playing TTS response
  *
- * VAD Features:
- *   1. Adaptive noise floor (calibration + slow EMA)
- *   2. Hysteresis: onset threshold > offset threshold (prevents oscillation)
- *   3. Onset hangover: ~300ms sustained above-threshold before speech trigger
- *   4. Speech band energy ratio: 300-3400Hz vs total energy (music rejection)
- *   5. High-pass filter at 80Hz (rumble/bass rejection)
- *   6. Peak RMS gating on recorded audio
+ * VAD FEATURES:
+ *   1. Adaptive noise floor (calibration + EMA)
+ *   2. Hysteresis: onset threshold > offset threshold
+ *   3. Onset hangover: sustained above-threshold before trigger
+ *   4. Speech band energy ratio (300–3400 Hz) — rejects music/broadband noise
+ *   5. High-pass filter at 80 Hz (bass/rumble rejection)
+ *   6. **Speech band check during USER_SPEAKING** — ambient noise won't reset timer
+ *   7. **Adaptive silence duration** — faster cutoff when clearly non-speech
+ *   8. **Max speech duration timeout** — 15s safety valve
+ *   9. **Energy trend detection** — falling energy = user stopped
+ *  10. Peak RMS gating on final audio blob
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -43,19 +47,19 @@ export interface VoiceConversationConfig {
   companyId: string;
   sessionId: string | null;
   ttsEnabled: boolean;
-  /** Minimum absolute RMS threshold. Default 0.012 */
+  /** Absolute minimum speech threshold. Default 0.012 */
   speechThreshold?: number;
-  /** Milliseconds of silence before ending a speech segment. Default 2500 */
+  /** Max silence (ms) before ending speech segment. Default 2500 */
   silenceDurationMs?: number;
-  /** Minimum speech duration (ms) to actually send. Default 600 */
+  /** Minimum speech length to send (ms). Default 500 */
   minSpeechMs?: number;
-  /** How many times above noise floor for ONSET. Default 3.0 */
+  /** Multiplier for onset threshold. Default 3.0 */
   noiseMultiplierOnset?: number;
-  /** How many times above noise floor for OFFSET (lower = stickier). Default 1.8 */
+  /** Multiplier for offset threshold (lower = stickier). Default 1.8 */
   noiseMultiplierOffset?: number;
 }
 
-/* ───────── Helpers ───────── */
+/* ───────── Audio Helpers ───────── */
 
 /** RMS from time-domain data */
 function calcRMS(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
@@ -69,40 +73,37 @@ function calcRMS(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
 }
 
 /**
- * Speech Band Energy Ratio: energy in 300–3400 Hz / total energy.
- * Human speech concentrates in this band; music is broader.
- * Returns 0-1 (higher = more likely speech).
+ * Speech Band Energy Ratio: energy in 300–3400 Hz / total.
+ * Human speech is concentrated here; music/noise is broader.
+ * Returns 0..1 (higher = more speech-like).
  */
 function calcSpeechBandRatio(analyser: AnalyserNode, freqBuf: Uint8Array<ArrayBuffer>, sampleRate: number): number {
   analyser.getByteFrequencyData(freqBuf);
-
   const binCount = analyser.frequencyBinCount;
-  const binWidth = sampleRate / (binCount * 2); // Hz per bin
-
+  const binWidth = sampleRate / (binCount * 2);
   const loIdx = Math.floor(300 / binWidth);
   const hiIdx = Math.min(Math.ceil(3400 / binWidth), binCount - 1);
 
   let speechEnergy = 0;
   let totalEnergy = 0;
-
   for (let i = 0; i < binCount; i++) {
-    const e = freqBuf[i] * freqBuf[i]; // squared magnitude
+    const e = freqBuf[i] * freqBuf[i];
     totalEnergy += e;
-    if (i >= loIdx && i <= hiIdx) {
-      speechEnergy += e;
-    }
+    if (i >= loIdx && i <= hiIdx) speechEnergy += e;
   }
-
-  if (totalEnergy === 0) return 0;
-  return speechEnergy / totalEnergy;
+  return totalEnergy === 0 ? 0 : speechEnergy / totalEnergy;
 }
 
-/* ────── Constants ────── */
-const CALIBRATION_DURATION_MS = 1500;
-const NOISE_EMA_ALPHA = 0.015;       // slow adaptation while listening
-const ONSET_HANGOVER_MS = 250;        // sustained energy above onset threshold before speech
-const SPEECH_BAND_MIN_RATIO = 0.25;   // at least 25% of energy in speech band to count
-const HIGH_PASS_FREQ = 80;            // Hz cutoff for rumble rejection
+/* ────── Tuning Constants ────── */
+const CALIBRATION_MS           = 1500;    // Calibration window
+const NOISE_EMA_ALPHA          = 0.012;   // Slow noise floor adaptation
+const ONSET_HANGOVER_MS        = 250;     // Must sustain above onset threshold
+const SPEECH_BAND_MIN_ONSET    = 0.28;    // Band ratio minimum for onset (stricter)
+const SPEECH_BAND_MIN_OFFSET   = 0.22;    // Band ratio minimum for offset (looser)
+const HIGH_PASS_FREQ           = 100;     // Hz cutoff (slightly higher for cafes)
+const MAX_SPEECH_DURATION_MS   = 15000;   // 15s safety cap
+const FAST_SILENCE_MS_FACTOR   = 0.45;    // When clearly non-speech, silence = X * normal
+const ENERGY_TREND_WINDOW      = 8;       // Frames to track for energy trend
 
 /* ════════════════ HOOK ════════════════ */
 export function useVoiceConversation(
@@ -115,7 +116,7 @@ export function useVoiceConversation(
     ttsEnabled,
     speechThreshold = 0.012,
     silenceDurationMs = 2500,
-    minSpeechMs = 600,
+    minSpeechMs = 500,
     noiseMultiplierOnset = 3.0,
     noiseMultiplierOffset = 1.8,
   } = config;
@@ -125,8 +126,9 @@ export function useVoiceConversation(
   const [audioLevel, setAudioLevel] = useState(0);
   const [noiseFloor, setNoiseFloor] = useState(0);
   const [dynamicThreshold, setDynamicThreshold] = useState(speechThreshold);
+  const [speechBandRatio, setSpeechBandRatio] = useState(0);
 
-  /* ── Refs ── */
+  /* ── Refs: Hardware ── */
   const stateRef = useRef<ConversationState>('IDLE');
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -137,13 +139,15 @@ export function useVoiceConversation(
   const audioChunksRef = useRef<Blob[]>([]);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
+  /* ── Refs: VAD timing ── */
   const vadFrameRef = useRef<number>(0);
   const speechStartTimeRef = useRef<number>(0);
   const lastSpeechTimeRef = useRef<number>(0);
   const peakRmsRef = useRef<number>(0);
   const sessionIdRef = useRef<string | null>(sessionId);
+  const lastFrameTimeRef = useRef<number>(0);
 
-  /* ── Adaptive Noise refs ── */
+  /* ── Refs: Adaptive noise ── */
   const noiseFloorRef = useRef<number>(0);
   const onsetThresholdRef = useRef<number>(speechThreshold);
   const offsetThresholdRef = useRef<number>(speechThreshold);
@@ -151,18 +155,19 @@ export function useVoiceConversation(
   const calibrationStartRef = useRef<number>(0);
   const calibratedRef = useRef<boolean>(false);
 
-  /* ── Onset hangover ref (sustained above-threshold time) ── */
-  const onsetAccumRef = useRef<number>(0);     // ms accumulated above onset threshold
-  const lastFrameTimeRef = useRef<number>(0);  // for delta-time calculation
+  /* ── Refs: Onset hangover ── */
+  const onsetAccumRef = useRef<number>(0);
 
-  // Keep refs in sync
+  /* ── Refs: Energy trend (detect falling energy) ── */
+  const energyHistoryRef = useRef<number[]>([]);
+
+  /* ── Keep in sync ── */
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
   const ttsEnabledRef = useRef(ttsEnabled);
   ttsEnabledRef.current = ttsEnabled;
   const companyIdRef = useRef(companyId);
   companyIdRef.current = companyId;
-
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
   /* ── State setter + mic muting ── */
@@ -176,15 +181,15 @@ export function useVoiceConversation(
     }
   }, []);
 
-  /** Update noise floor and both thresholds */
+  /** Update noise floor → recompute both thresholds */
   const updateThresholds = useCallback((nf: number) => {
     const onset = Math.max(nf * noiseMultiplierOnset, speechThreshold);
-    const offset = Math.max(nf * noiseMultiplierOffset, speechThreshold * 0.8);
+    const offset = Math.max(nf * noiseMultiplierOffset, speechThreshold * 0.75);
     noiseFloorRef.current = nf;
     onsetThresholdRef.current = onset;
     offsetThresholdRef.current = offset;
     setNoiseFloor(nf);
-    setDynamicThreshold(onset); // display onset as "threshold"
+    setDynamicThreshold(onset);
   }, [noiseMultiplierOnset, noiseMultiplierOffset, speechThreshold]);
 
   /* ───────────── TTS Playback ───────────── */
@@ -199,7 +204,6 @@ export function useVoiceConversation(
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioPlayerRef.current = audio;
-
       audio.onended = () => {
         URL.revokeObjectURL(url);
         audioPlayerRef.current = null;
@@ -229,13 +233,11 @@ export function useVoiceConversation(
   const sendAudioToBackend = useCallback(async (blob: Blob) => {
     setConvState('PROCESSING');
     callbacksRef.current.onProcessingStage?.('Transcribing...');
-
     try {
       const transcription = await aiService.transcribe(blob);
       const userText = transcription.text?.trim();
-
       if (!userText) {
-        console.log('[VoiceConv] Empty transcription, returning to listening');
+        console.log('[VoiceConv] Empty transcription → back to listening');
         if (stateRef.current !== 'IDLE') setConvState('LISTENING');
         return;
       }
@@ -243,16 +245,16 @@ export function useVoiceConversation(
       callbacksRef.current.onUserMessage(userText);
       callbacksRef.current.onProcessingStage?.('Thinking...');
 
-      const data = await aiService.sendMessage(
-        companyIdRef.current,
-        { message: userText, session_id: sessionIdRef.current || undefined, input_type: 'voice' },
-      );
+      const data = await aiService.sendMessage(companyIdRef.current, {
+        message: userText,
+        session_id: sessionIdRef.current || undefined,
+        input_type: 'voice',
+      });
 
       if (data.session_id) {
         sessionIdRef.current = data.session_id;
         callbacksRef.current.onSessionId(data.session_id);
       }
-
       callbacksRef.current.onCallActive(data.call_active);
       callbacksRef.current.onAgentMessage(data.response, data.latency_ms, data.tools_used);
 
@@ -265,16 +267,23 @@ export function useVoiceConversation(
         }
         return;
       }
-
       await playTTS(data.response);
     } catch (e: any) {
       console.error('[VoiceConv] Backend error:', e);
-      callbacksRef.current.onError('Voice processing failed. Returning to listening...');
+      callbacksRef.current.onError('Voice processing failed.');
       if (stateRef.current !== 'IDLE') setConvState('LISTENING');
     }
   }, [playTTS, setConvState]);
 
-  /* ───────────── VAD Loop (robust) ───────────── */
+  /* ─── Helper: stop recording & trigger send ─── */
+  const finalizeRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    }
+  }, []);
+
+  /* ───────────── VAD Loop ───────────── */
   const startVADLoop = useCallback(() => {
     const analyser = analyserRef.current;
     const timeBuf = dataArrayRef.current;
@@ -283,6 +292,7 @@ export function useVoiceConversation(
     if (!analyser || !timeBuf || !freqBuf) return;
 
     lastFrameTimeRef.current = Date.now();
+    energyHistoryRef.current = [];
 
     const loop = () => {
       vadFrameRef.current = requestAnimationFrame(loop);
@@ -304,61 +314,54 @@ export function useVoiceConversation(
       const rms = calcRMS(analyser, timeBuf);
       const bandRatio = calcSpeechBandRatio(analyser, freqBuf, sampleRate);
       setAudioLevel(rms);
+      setSpeechBandRatio(bandRatio);
 
-      /* ── CALIBRATING ── */
+      /* ════ CALIBRATING ════ */
       if (currentState === 'CALIBRATING') {
         calibrationSamplesRef.current.push(rms);
-        if (now - calibrationStartRef.current >= CALIBRATION_DURATION_MS) {
-          const samples = calibrationSamplesRef.current;
-          const sorted = [...samples].sort((a, b) => a - b);
+        if (now - calibrationStartRef.current >= CALIBRATION_MS) {
+          const sorted = [...calibrationSamplesRef.current].sort((a, b) => a - b);
           const p75 = sorted[Math.floor(sorted.length * 0.75)] || 0;
-
           console.log(
-            `[VAD] Calibration: ${samples.length} samples, noiseFloor=${p75.toFixed(4)}, ` +
-            `onsetTh=${Math.max(p75 * noiseMultiplierOnset, speechThreshold).toFixed(4)}, ` +
-            `offsetTh=${Math.max(p75 * noiseMultiplierOffset, speechThreshold * 0.8).toFixed(4)}`,
+            `[VAD] Calibrated: samples=${sorted.length}, noise=${p75.toFixed(4)}, ` +
+            `onset=${Math.max(p75 * noiseMultiplierOnset, speechThreshold).toFixed(4)}, ` +
+            `offset=${Math.max(p75 * noiseMultiplierOffset, speechThreshold * 0.75).toFixed(4)}`,
           );
-
           updateThresholds(p75);
           calibratedRef.current = true;
           onsetAccumRef.current = 0;
+          energyHistoryRef.current = [];
           setConvState('LISTENING');
           callbacksRef.current.onProcessingStage?.('');
         }
         return;
       }
 
-      // Read thresholds
       const onsetTh = onsetThresholdRef.current;
       const offsetTh = offsetThresholdRef.current;
 
-      // Combined speech detection: RMS above threshold AND speech band ratio high enough
-      const rmsAboveOnset = rms > onsetTh;
-      const rmsAboveOffset = rms > offsetTh;
-      const speechLikely = bandRatio >= SPEECH_BAND_MIN_RATIO;
-
-      /* ── LISTENING ── */
+      /* ════ LISTENING ════ */
       if (currentState === 'LISTENING') {
-        // Adapt noise floor slowly (only when not speech-like)
-        if (!rmsAboveOffset) {
+        // Adapt noise floor slowly (only during non-speech)
+        if (rms <= offsetTh) {
           const nf = noiseFloorRef.current;
           const newNf = nf * (1 - NOISE_EMA_ALPHA) + rms * NOISE_EMA_ALPHA;
-          if (Math.abs(newNf - nf) > 0.0003) {
-            updateThresholds(newNf);
-          }
-          // Reset onset accumulator
+          if (Math.abs(newNf - nf) > 0.0002) updateThresholds(newNf);
           onsetAccumRef.current = 0;
         }
 
-        // Onset detection: RMS above onset threshold + speech band check + hangover
+        // Onset detection: RMS > onset AND speech band check AND hangover
+        const rmsAboveOnset = rms > onsetTh;
+        const speechLikely = bandRatio >= SPEECH_BAND_MIN_ONSET;
+
         if (rmsAboveOnset && speechLikely) {
           onsetAccumRef.current += dt;
-
           if (onsetAccumRef.current >= ONSET_HANGOVER_MS) {
-            // Sustained speech detected → start recording
+            // ✅ Confirmed speech → start recording
             speechStartTimeRef.current = now;
             lastSpeechTimeRef.current = now;
             peakRmsRef.current = rms;
+            energyHistoryRef.current = [rms];
             setConvState('USER_SPEAKING');
 
             const stream = streamRef.current;
@@ -370,28 +373,25 @@ export function useVoiceConversation(
                   : 'audio/webm';
                 const recorder = new MediaRecorder(stream, { mimeType });
                 mediaRecorderRef.current = recorder;
-
                 recorder.ondataavailable = (e) => {
                   if (e.data.size > 0) audioChunksRef.current.push(e.data);
                 };
-
                 recorder.onstop = () => {
                   const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
                   const speechDuration = Date.now() - speechStartTimeRef.current;
                   const peakRms = peakRmsRef.current;
+                  const minPeakRms = onsetThresholdRef.current * 1.05;
 
-                  const minPeakRms = onsetThresholdRef.current * 1.1;
                   if (audioBlob.size < 1000 || speechDuration < minSpeechMs || peakRms < minPeakRms) {
                     console.log(
                       `[VAD] Rejected: size=${audioBlob.size}, dur=${speechDuration}ms, ` +
-                      `peak=${peakRms.toFixed(4)}, minPeak=${minPeakRms.toFixed(4)}`,
+                      `peak=${peakRms.toFixed(4)}, min=${minPeakRms.toFixed(4)}`,
                     );
                     if (stateRef.current !== 'IDLE') setConvState('LISTENING');
                   } else {
                     sendAudioToBackend(audioBlob);
                   }
                 };
-
                 recorder.start(100);
               } catch (err) {
                 console.error('[VAD] MediaRecorder error:', err);
@@ -399,28 +399,80 @@ export function useVoiceConversation(
             }
           }
         } else {
-          // Reset onset accumulator if not consistently above threshold
+          // Decay onset accumulator (2× faster than build-up)
           if (onsetAccumRef.current > 0) {
-            onsetAccumRef.current = Math.max(0, onsetAccumRef.current - dt * 2); // decay faster than accumulate
+            onsetAccumRef.current = Math.max(0, onsetAccumRef.current - dt * 2);
           }
         }
+
+      /* ════ USER_SPEAKING ════ */
       } else if (currentState === 'USER_SPEAKING') {
-        /* ── USER_SPEAKING ── */
-        // Use OFFSET threshold (lower, stickier) — hysteresis
-        if (rmsAboveOffset) {
+        // Track energy trend
+        const hist = energyHistoryRef.current;
+        hist.push(rms);
+        if (hist.length > ENERGY_TREND_WINDOW) hist.shift();
+
+        if (rms > peakRmsRef.current) peakRmsRef.current = rms;
+
+        // ──────────────────────────────────────────────
+        // KEY FIX: Check BOTH RMS and speech band ratio.
+        // Café music may push RMS above offset, but its
+        // band ratio will be low → we won't count it as speech.
+        // ──────────────────────────────────────────────
+        const rmsAboveOffset = rms > offsetTh;
+        const bandIsSpeechLike = bandRatio >= SPEECH_BAND_MIN_OFFSET;
+        const stillSpeaking = rmsAboveOffset && bandIsSpeechLike;
+
+        if (stillSpeaking) {
           lastSpeechTimeRef.current = now;
-          if (rms > peakRmsRef.current) peakRmsRef.current = rms;
-        } else {
-          const silenceMs = now - lastSpeechTimeRef.current;
-          if (silenceMs >= silenceDurationMs) {
-            if (
-              mediaRecorderRef.current &&
-              mediaRecorderRef.current.state !== 'inactive'
-            ) {
-              mediaRecorderRef.current.stop();
-              mediaRecorderRef.current = null;
-            }
+        }
+
+        const silenceMs = now - lastSpeechTimeRef.current;
+
+        // Adaptive silence duration:
+        //   If band ratio is very low → clearly ambient noise → use shorter timeout
+        //   If band ratio is moderate → could be trailing speech → use full timeout
+        let effectiveSilenceDuration = silenceDurationMs;
+        if (bandRatio < 0.15) {
+          // Clearly non-speech (music/broadband) → cut silence wait significantly
+          effectiveSilenceDuration = silenceDurationMs * FAST_SILENCE_MS_FACTOR;
+        } else if (bandRatio < SPEECH_BAND_MIN_OFFSET) {
+          // Ambiguous range → slightly shorter
+          effectiveSilenceDuration = silenceDurationMs * 0.7;
+        }
+
+        // Energy trend: if energy has been declining steadily, user likely stopped
+        let energyFalling = false;
+        if (hist.length >= ENERGY_TREND_WINDOW) {
+          const firstHalf = hist.slice(0, Math.floor(hist.length / 2));
+          const secondHalf = hist.slice(Math.floor(hist.length / 2));
+          const avg1 = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+          const avg2 = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+          // If recent energy is significantly lower (dropped by 40%+)
+          if (avg2 < avg1 * 0.6 && avg2 < offsetTh * 1.2) {
+            energyFalling = true;
           }
+        }
+
+        // If energy is falling AND silence threshold met (with reduced threshold)
+        if (energyFalling && silenceMs >= effectiveSilenceDuration * 0.6) {
+          console.log(`[VAD] Energy falling + partial silence → end speech (${silenceMs}ms)`);
+          finalizeRecording();
+        }
+        // Standard silence check with adaptive duration
+        else if (silenceMs >= effectiveSilenceDuration) {
+          console.log(
+            `[VAD] Silence ${silenceMs}ms >= ${effectiveSilenceDuration.toFixed(0)}ms → end speech ` +
+            `(band=${bandRatio.toFixed(3)}, rms=${rms.toFixed(4)})`,
+          );
+          finalizeRecording();
+        }
+
+        // Max speech duration safety valve
+        const speechDur = now - speechStartTimeRef.current;
+        if (speechDur > MAX_SPEECH_DURATION_MS) {
+          console.log(`[VAD] Max speech duration ${MAX_SPEECH_DURATION_MS}ms exceeded → force end`);
+          finalizeRecording();
         }
       }
     };
@@ -429,7 +481,7 @@ export function useVoiceConversation(
   }, [
     speechThreshold, noiseMultiplierOnset, noiseMultiplierOffset,
     silenceDurationMs, minSpeechMs,
-    sendAudioToBackend, setConvState, updateThresholds,
+    sendAudioToBackend, setConvState, updateThresholds, finalizeRecording,
   ]);
 
   /* ───────────── Start Listening ───────────── */
@@ -446,19 +498,18 @@ export function useVoiceConversation(
 
       const audioCtx = new AudioContext();
       audioCtxRef.current = audioCtx;
-
       const source = audioCtx.createMediaStreamSource(stream);
 
-      // ── High-pass filter at 80 Hz (cut bass/rumble) ──
+      // High-pass filter: cut bass/rumble (100 Hz)
       const highPass = audioCtx.createBiquadFilter();
       highPass.type = 'highpass';
       highPass.frequency.value = HIGH_PASS_FREQ;
-      highPass.Q.value = 0.7; // gentle rolloff
+      highPass.Q.value = 0.7;
 
-      // ── Analyser ──
+      // Analyser
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.4;
+      analyser.smoothingTimeConstant = 0.3; // slightly less smoothing for responsiveness
 
       // Chain: source → highPass → analyser
       source.connect(highPass);
@@ -468,7 +519,6 @@ export function useVoiceConversation(
       dataArrayRef.current = new Uint8Array(analyser.fftSize);
       freqArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
 
-      // Start calibration
       if (!calibratedRef.current) {
         calibrationSamplesRef.current = [];
         calibrationStartRef.current = Date.now();
@@ -482,14 +532,14 @@ export function useVoiceConversation(
     } catch (err: any) {
       console.error('[VoiceConv] Mic error:', err);
       if (err.name === 'NotAllowedError') {
-        callbacksRef.current.onError('Microphone access denied. Please allow mic access in browser settings.');
+        callbacksRef.current.onError('Microphone access denied.');
       } else {
         callbacksRef.current.onError('Could not access microphone');
       }
     }
   }, [setConvState, startVADLoop]);
 
-  /* ───────────── Stop Listening ───────────── */
+  /* ───────────── Stop ───────────── */
   const stopListening = useCallback(() => {
     if (vadFrameRef.current) {
       cancelAnimationFrame(vadFrameRef.current);
@@ -507,6 +557,7 @@ export function useVoiceConversation(
     analyserRef.current = null;
     calibratedRef.current = false;
     onsetAccumRef.current = 0;
+    energyHistoryRef.current = [];
     setConvState('IDLE');
     setAudioLevel(0);
   }, [setConvState, stopTTS]);
@@ -518,8 +569,9 @@ export function useVoiceConversation(
       calibrationStartRef.current = Date.now();
       calibratedRef.current = false;
       onsetAccumRef.current = 0;
+      energyHistoryRef.current = [];
       setConvState('CALIBRATING');
-      callbacksRef.current.onProcessingStage?.('Re-calibrating ambient noise...');
+      callbacksRef.current.onProcessingStage?.('Re-calibrating...');
     }
   }, [setConvState]);
 
@@ -549,6 +601,7 @@ export function useVoiceConversation(
     audioLevel,
     noiseFloor,
     dynamicThreshold,
+    speechBandRatio,
     analyser: analyserRef.current,
     startListening,
     stopListening,
