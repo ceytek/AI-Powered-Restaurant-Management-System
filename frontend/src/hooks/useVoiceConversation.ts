@@ -1,23 +1,18 @@
 /**
- * useVoiceConversation — VAD + Turn-Taking State Machine
+ * useVoiceConversation — Adaptive VAD + Turn-Taking State Machine
  *
  * States:
  *   IDLE           → Not in a call
+ *   CALIBRATING    → Measuring ambient noise level (1-2s)
  *   LISTENING      → Mic live, waiting for user speech
  *   USER_SPEAKING  → VAD detected speech, recording audio
  *   PROCESSING     → Speech ended, audio sent to backend
  *   AGENT_SPEAKING → TTS playing agent response
  *
- * Flow:
- *   startListening() → LISTENING
- *     ↓ (voice detected)
- *   USER_SPEAKING
- *     ↓ (silence > threshold)
- *   PROCESSING
- *     ↓ (response + TTS)
- *   AGENT_SPEAKING
- *     ↓ (TTS done)
- *   LISTENING  ← (loop)
+ * Noise Adaptation:
+ *   - On first LISTENING, calibrates ambient noise for ~1.5s
+ *   - Speech threshold = max(noiseFloor * multiplier, minAbsoluteThreshold)
+ *   - Noise floor is continuously updated when LISTENING (slow EMA)
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -26,6 +21,7 @@ import { aiService } from '@/services/aiService';
 /* ───────── Types ───────── */
 export type ConversationState =
   | 'IDLE'
+  | 'CALIBRATING'
   | 'LISTENING'
   | 'USER_SPEAKING'
   | 'PROCESSING'
@@ -37,7 +33,7 @@ export interface VoiceConversationCallbacks {
   onAgentMessage: (text: string, latencyMs?: number, toolsUsed?: string[]) => void;
   onCallActive: (active: boolean) => void;
   onError: (msg: string) => void;
-  /** Called with processing stage description ("Transcribing…", "Thinking…") */
+  /** Called with processing stage description ("Calibrating…", "Transcribing…", "Thinking…") */
   onProcessingStage?: (stage: string) => void;
 }
 
@@ -45,17 +41,19 @@ export interface VoiceConversationConfig {
   companyId: string;
   sessionId: string | null;
   ttsEnabled: boolean;
-  /** RMS threshold to consider as speech (0‑1). Default 0.02 */
+  /** Minimum absolute RMS threshold (0‑1). Used as floor for adaptive threshold. Default 0.015 */
   speechThreshold?: number;
   /** Milliseconds of silence before ending a speech segment. Default 2500 */
   silenceDurationMs?: number;
   /** Minimum speech duration (ms) to actually send. Default 600 */
   minSpeechMs?: number;
+  /** How many times above noise floor to set speech threshold. Default 2.5 */
+  noiseMultiplier?: number;
 }
 
 /* ───────── Helpers ───────── */
 
-/** Calculate RMS (Root Mean Square) energy from frequency data */
+/** Calculate RMS (Root Mean Square) energy from time-domain data */
 function calcRMS(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
   analyser.getByteTimeDomainData(buf);
   let sum = 0;
@@ -75,14 +73,17 @@ export function useVoiceConversation(
     companyId,
     sessionId,
     ttsEnabled,
-    speechThreshold = 0.02,
+    speechThreshold = 0.015,
     silenceDurationMs = 2500,
     minSpeechMs = 600,
+    noiseMultiplier = 2.5,
   } = config;
 
   /* ── State ── */
   const [state, setState] = useState<ConversationState>('IDLE');
   const [audioLevel, setAudioLevel] = useState(0);
+  const [noiseFloor, setNoiseFloor] = useState(0);
+  const [dynamicThreshold, setDynamicThreshold] = useState(speechThreshold);
 
   /* ── Refs (no re-renders) ── */
   const stateRef = useRef<ConversationState>('IDLE');
@@ -100,6 +101,19 @@ export function useVoiceConversation(
   /** Peak RMS during a recording – used to reject silent clips */
   const peakRmsRef = useRef<number>(0);
   const sessionIdRef = useRef<string | null>(sessionId);
+
+  /* ── Adaptive Noise Floor refs ── */
+  const noiseFloorRef = useRef<number>(0);
+  const dynamicThresholdRef = useRef<number>(speechThreshold);
+  /** Calibration samples collected during calibration phase */
+  const calibrationSamplesRef = useRef<number[]>([]);
+  const calibrationStartRef = useRef<number>(0);
+  /** Whether we've done initial calibration for this listening session */
+  const calibratedRef = useRef<boolean>(false);
+  /** EMA alpha for noise floor adaptation while listening (slow) */
+  const NOISE_EMA_ALPHA = 0.02; // very slow adaptation
+  /** Duration of calibration phase in ms */
+  const CALIBRATION_DURATION_MS = 1500;
 
   // Keep refs in sync
   const callbacksRef = useRef(callbacks);
@@ -128,10 +142,18 @@ export function useVoiceConversation(
     }
   }, []);
 
+  /** Calculate and apply dynamic threshold from noise floor */
+  const updateThreshold = useCallback((nf: number) => {
+    const computed = Math.max(nf * noiseMultiplier, speechThreshold);
+    dynamicThresholdRef.current = computed;
+    noiseFloorRef.current = nf;
+    setNoiseFloor(nf);
+    setDynamicThreshold(computed);
+  }, [noiseMultiplier, speechThreshold]);
+
   /* ───────────── TTS Playback ───────────── */
   const playTTS = useCallback(async (text: string) => {
     if (!ttsEnabledRef.current) {
-      // If TTS disabled, go straight back to listening
       setConvState('LISTENING');
       return;
     }
@@ -147,7 +169,6 @@ export function useVoiceConversation(
       audio.onended = () => {
         URL.revokeObjectURL(url);
         audioPlayerRef.current = null;
-        // After TTS finishes → go back to listening
         if (stateRef.current === 'AGENT_SPEAKING') {
           setConvState('LISTENING');
         }
@@ -164,7 +185,6 @@ export function useVoiceConversation(
       await audio.play();
     } catch (e) {
       console.error('[VoiceConv] TTS error:', e);
-      // Fallback: go to listening even if TTS fails
       if (stateRef.current === 'AGENT_SPEAKING') {
         setConvState('LISTENING');
       }
@@ -191,7 +211,6 @@ export function useVoiceConversation(
       const userText = transcription.text?.trim();
 
       if (!userText) {
-        // Nothing meaningful transcribed → go back to listening
         console.log('[VoiceConv] Empty transcription, returning to listening');
         if (stateRef.current !== 'IDLE') {
           setConvState('LISTENING');
@@ -199,7 +218,7 @@ export function useVoiceConversation(
         return;
       }
 
-      // Show the user's words instantly (before AI processes)
+      // Show the user's words instantly
       callbacksRef.current.onUserMessage(userText);
       callbacksRef.current.onProcessingStage?.('Thinking...');
 
@@ -213,7 +232,6 @@ export function useVoiceConversation(
         },
       );
 
-      // Update session
       if (data.session_id) {
         sessionIdRef.current = data.session_id;
         callbacksRef.current.onSessionId(data.session_id);
@@ -221,14 +239,12 @@ export function useVoiceConversation(
 
       callbacksRef.current.onCallActive(data.call_active);
 
-      // Show agent response
       callbacksRef.current.onAgentMessage(
         data.response,
         data.latency_ms,
         data.tools_used,
       );
 
-      // If call ended
       if (!data.call_active) {
         if (ttsEnabledRef.current) {
           await playTTS(data.response);
@@ -239,19 +255,17 @@ export function useVoiceConversation(
         return;
       }
 
-      // Play TTS (which will transition to LISTENING after done)
       await playTTS(data.response);
     } catch (e: any) {
       console.error('[VoiceConv] Backend error:', e);
       callbacksRef.current.onError('Voice processing failed. Returning to listening...');
-      // Recover: go back to listening
       if (stateRef.current !== 'IDLE') {
         setConvState('LISTENING');
       }
     }
   }, [playTTS, setConvState]);
 
-  /* ───────────── VAD Loop (energy-based) ───────────── */
+  /* ───────────── VAD Loop (adaptive noise floor) ───────────── */
   const startVADLoop = useCallback(() => {
     const analyser = analyserRef.current;
     const buf = dataArrayRef.current;
@@ -263,7 +277,11 @@ export function useVoiceConversation(
       const currentState = stateRef.current;
 
       // Don't run VAD when not in a listening-capable state
-      if (currentState !== 'LISTENING' && currentState !== 'USER_SPEAKING') {
+      if (
+        currentState !== 'CALIBRATING' &&
+        currentState !== 'LISTENING' &&
+        currentState !== 'USER_SPEAKING'
+      ) {
         setAudioLevel(0);
         return;
       }
@@ -272,9 +290,50 @@ export function useVoiceConversation(
       setAudioLevel(rms);
 
       const now = Date.now();
-      const isSpeech = rms > speechThreshold;
 
+      /* ── CALIBRATING: measure ambient noise ── */
+      if (currentState === 'CALIBRATING') {
+        calibrationSamplesRef.current.push(rms);
+
+        const elapsed = now - calibrationStartRef.current;
+        if (elapsed >= CALIBRATION_DURATION_MS) {
+          // Compute noise floor from calibration samples
+          const samples = calibrationSamplesRef.current;
+          // Use the 75th percentile (to ignore occasional transient peaks)
+          const sorted = [...samples].sort((a, b) => a - b);
+          const p75idx = Math.floor(sorted.length * 0.75);
+          const measuredFloor = sorted[p75idx] || 0;
+
+          console.log(
+            `[VoiceConv] Calibration done: ${samples.length} samples, ` +
+            `noise floor = ${measuredFloor.toFixed(4)}, ` +
+            `dynamic threshold = ${Math.max(measuredFloor * noiseMultiplier, speechThreshold).toFixed(4)}`,
+          );
+
+          updateThreshold(measuredFloor);
+          calibratedRef.current = true;
+          setConvState('LISTENING');
+          callbacksRef.current.onProcessingStage?.('');
+        }
+        return;
+      }
+
+      // Use dynamic threshold
+      const threshold = dynamicThresholdRef.current;
+      const isSpeech = rms > threshold;
+
+      /* ── LISTENING ── */
       if (currentState === 'LISTENING') {
+        // Slowly adapt noise floor while listening (only when not speech)
+        if (!isSpeech) {
+          const nf = noiseFloorRef.current;
+          const newNf = nf * (1 - NOISE_EMA_ALPHA) + rms * NOISE_EMA_ALPHA;
+          // Only update if the change is meaningful (avoid constant re-renders)
+          if (Math.abs(newNf - nf) > 0.0005) {
+            updateThreshold(newNf);
+          }
+        }
+
         if (isSpeech) {
           // Speech detected → start recording
           speechStartTimeRef.current = now;
@@ -302,11 +361,12 @@ export function useVoiceConversation(
                 const speechDuration = Date.now() - speechStartTimeRef.current;
                 const peakRms = peakRmsRef.current;
 
-                // Reject: too short, too small, or too quiet (likely noise/silence)
-                const MIN_PEAK_RMS = 0.025;
-                if (audioBlob.size < 1000 || speechDuration < minSpeechMs || peakRms < MIN_PEAK_RMS) {
+                // Reject: too short, too small, or peak not significantly above noise
+                const minPeakRms = dynamicThresholdRef.current * 1.2;
+                if (audioBlob.size < 1000 || speechDuration < minSpeechMs || peakRms < minPeakRms) {
                   console.log(
-                    `[VoiceConv] Rejected: size=${audioBlob.size}, dur=${speechDuration}ms, peak=${peakRms.toFixed(4)}`,
+                    `[VoiceConv] Rejected: size=${audioBlob.size}, dur=${speechDuration}ms, ` +
+                    `peak=${peakRms.toFixed(4)}, minPeak=${minPeakRms.toFixed(4)}`,
                   );
                   if (stateRef.current !== 'IDLE') {
                     setConvState('LISTENING');
@@ -316,13 +376,14 @@ export function useVoiceConversation(
                 }
               };
 
-              recorder.start(100); // collect data every 100ms
+              recorder.start(100);
             } catch (err) {
               console.error('[VoiceConv] MediaRecorder error:', err);
             }
           }
         }
       } else if (currentState === 'USER_SPEAKING') {
+        /* ── USER_SPEAKING ── */
         if (isSpeech) {
           lastSpeechTimeRef.current = now;
           if (rms > peakRmsRef.current) peakRmsRef.current = rms;
@@ -338,19 +399,18 @@ export function useVoiceConversation(
               mediaRecorderRef.current.stop();
               mediaRecorderRef.current = null;
             }
-            // State transition happens in recorder.onstop
           }
         }
       }
     };
 
     loop();
-  }, [speechThreshold, silenceDurationMs, minSpeechMs, sendAudioToBackend, setConvState]);
+  }, [speechThreshold, noiseMultiplier, silenceDurationMs, minSpeechMs, sendAudioToBackend, setConvState, updateThreshold]);
 
   /* ───────────── Start Listening ───────────── */
   const startListening = useCallback(async () => {
     try {
-      // Get microphone with echo cancellation
+      // Get microphone with noise suppression
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -372,7 +432,15 @@ export function useVoiceConversation(
       analyserRef.current = analyser;
       dataArrayRef.current = new Uint8Array(analyser.fftSize);
 
-      setConvState('LISTENING');
+      // Start with calibration phase if not already calibrated
+      if (!calibratedRef.current) {
+        calibrationSamplesRef.current = [];
+        calibrationStartRef.current = Date.now();
+        setConvState('CALIBRATING');
+        callbacksRef.current.onProcessingStage?.('Calibrating ambient noise...');
+      } else {
+        setConvState('LISTENING');
+      }
 
       // Start the VAD loop
       startVADLoop();
@@ -390,13 +458,11 @@ export function useVoiceConversation(
 
   /* ───────────── Stop Listening ───────────── */
   const stopListening = useCallback(() => {
-    // Cancel VAD loop
     if (vadFrameRef.current) {
       cancelAnimationFrame(vadFrameRef.current);
       vadFrameRef.current = 0;
     }
 
-    // Stop any ongoing recording
     if (
       mediaRecorderRef.current &&
       mediaRecorderRef.current.state !== 'inactive'
@@ -405,21 +471,32 @@ export function useVoiceConversation(
       mediaRecorderRef.current = null;
     }
 
-    // Stop TTS
     stopTTS();
 
-    // Release mic
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
 
-    // Close audio context
     audioCtxRef.current?.close();
     audioCtxRef.current = null;
     analyserRef.current = null;
 
+    // Reset calibration for next session
+    calibratedRef.current = false;
+
     setConvState('IDLE');
     setAudioLevel(0);
   }, [setConvState, stopTTS]);
+
+  /* ───────────── Re-calibrate (manual trigger) ───────────── */
+  const recalibrate = useCallback(() => {
+    if (stateRef.current === 'LISTENING' || stateRef.current === 'CALIBRATING') {
+      calibrationSamplesRef.current = [];
+      calibrationStartRef.current = Date.now();
+      calibratedRef.current = false;
+      setConvState('CALIBRATING');
+      callbacksRef.current.onProcessingStage?.('Re-calibrating ambient noise...');
+    }
+  }, [setConvState]);
 
   /* ───────────── Barge-in (Interrupt Agent) ───────────── */
   const interruptAgent = useCallback(() => {
@@ -448,12 +525,16 @@ export function useVoiceConversation(
   return {
     state,
     audioLevel,
+    noiseFloor,
+    dynamicThreshold,
     analyser: analyserRef.current,
     startListening,
     stopListening,
     interruptAgent,
+    recalibrate,
     stopTTS,
     isIdle: state === 'IDLE',
+    isCalibrating: state === 'CALIBRATING',
     isListening: state === 'LISTENING',
     isUserSpeaking: state === 'USER_SPEAKING',
     isProcessing: state === 'PROCESSING',

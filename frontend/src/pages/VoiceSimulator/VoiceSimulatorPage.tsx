@@ -320,6 +320,7 @@ function PulseRings({ color = 'green' }: { color?: string }) {
 function ConversationStatePill({ state }: { state: ConversationState }) {
   const configs: Record<ConversationState, { label: string; icon: typeof Ear; color: string; pulse?: boolean }> = {
     IDLE: { label: 'Idle', icon: Phone, color: 'bg-muted text-muted-foreground' },
+    CALIBRATING: { label: 'Calibrating...', icon: Radio, color: 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300', pulse: true },
     LISTENING: { label: 'Listening...', icon: Ear, color: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300', pulse: true },
     USER_SPEAKING: { label: 'You\'re speaking', icon: Mic, color: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300', pulse: true },
     PROCESSING: { label: 'Processing...', icon: Zap, color: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300', pulse: true },
@@ -840,6 +841,8 @@ export function VoiceSimulatorPage() {
 
     if (mode === 'live') {
       switch (voiceConv.state) {
+        case 'CALIBRATING':
+          return 'Live · Calibrating noise...';
         case 'LISTENING':
           return 'Live · Listening...';
         case 'USER_SPEAKING':
@@ -1222,7 +1225,7 @@ export function VoiceSimulatorPage() {
                   {showSettings && mode === 'live' && (
                     <div className="mb-3 p-3 bg-muted/40 rounded-lg border space-y-3 animate-in slide-in-from-top-2 duration-200">
                       <div className="flex items-center justify-between">
-                        <Label className="text-xs">Speech Sensitivity</Label>
+                        <Label className="text-xs">Min Speech Threshold</Label>
                         <span className="text-[10px] text-muted-foreground font-mono">{speechThreshold.toFixed(3)}</span>
                       </div>
                       <Slider
@@ -1233,7 +1236,7 @@ export function VoiceSimulatorPage() {
                         step={0.001}
                         className="w-full"
                       />
-                      <p className="text-[10px] text-muted-foreground">Lower = more sensitive, Higher = less sensitive (ignores quiet sounds)</p>
+                      <p className="text-[10px] text-muted-foreground">Minimum absolute threshold. Adaptive noise floor may increase this automatically.</p>
 
                       <div className="flex items-center justify-between">
                         <Label className="text-xs">Silence Before Send</Label>
@@ -1248,6 +1251,21 @@ export function VoiceSimulatorPage() {
                         className="w-full"
                       />
                       <p className="text-[10px] text-muted-foreground">How long to wait after you stop speaking before sending</p>
+
+                      {/* Noise floor info */}
+                      {voiceConv.noiseFloor > 0 && (
+                        <div className="pt-2 border-t space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-muted-foreground">🔈 Ambient Noise Floor</span>
+                            <span className="text-[10px] font-mono text-muted-foreground">{voiceConv.noiseFloor.toFixed(4)}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-muted-foreground">🎯 Active Threshold</span>
+                            <span className="text-[10px] font-mono font-medium">{voiceConv.dynamicThreshold.toFixed(4)}</span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground italic">Threshold auto-adapts to ambient noise (×2.5)</p>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1257,7 +1275,7 @@ export function VoiceSimulatorPage() {
                       {/* Audio Level Meter */}
                       <AudioLevelMeter
                         level={voiceConv.audioLevel}
-                        isActive={voiceConv.isListening || voiceConv.isUserSpeaking}
+                        isActive={voiceConv.isListening || voiceConv.isUserSpeaking || voiceConv.isCalibrating}
                       />
 
                       {/* Central Visual Indicator */}
@@ -1265,23 +1283,27 @@ export function VoiceSimulatorPage() {
                         <div
                           className={cn(
                             'w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300',
-                            voiceConv.isListening
-                              ? 'bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-lg shadow-emerald-200 dark:shadow-emerald-900/30'
-                              : voiceConv.isUserSpeaking
-                                ? 'bg-gradient-to-br from-rose-500 to-pink-600 text-white scale-110 shadow-lg shadow-rose-200 dark:shadow-rose-900/30'
-                                : voiceConv.isProcessing
-                                  ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-200'
-                                  : voiceConv.isAgentSpeaking
-                                    ? 'bg-gradient-to-br from-amber-500 to-yellow-600 text-white shadow-lg shadow-amber-200'
-                                    : 'bg-muted text-muted-foreground',
+                            voiceConv.isCalibrating
+                              ? 'bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-200 dark:shadow-violet-900/30'
+                              : voiceConv.isListening
+                                ? 'bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-lg shadow-emerald-200 dark:shadow-emerald-900/30'
+                                : voiceConv.isUserSpeaking
+                                  ? 'bg-gradient-to-br from-rose-500 to-pink-600 text-white scale-110 shadow-lg shadow-rose-200 dark:shadow-rose-900/30'
+                                  : voiceConv.isProcessing
+                                    ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg shadow-blue-200'
+                                    : voiceConv.isAgentSpeaking
+                                      ? 'bg-gradient-to-br from-amber-500 to-yellow-600 text-white shadow-lg shadow-amber-200'
+                                      : 'bg-muted text-muted-foreground',
                           )}
                         >
+                          {voiceConv.isCalibrating && <Radio className="h-7 w-7 animate-pulse" />}
                           {voiceConv.isListening && <Ear className="h-7 w-7" />}
                           {voiceConv.isUserSpeaking && <Mic className="h-7 w-7 animate-pulse" />}
                           {voiceConv.isProcessing && <Loader2 className="h-7 w-7 animate-spin" />}
                           {voiceConv.isAgentSpeaking && <AudioLines className="h-7 w-7 animate-pulse" />}
                           {voiceConv.isIdle && <Radio className="h-7 w-7" />}
                         </div>
+                        {voiceConv.isCalibrating && <PulseRings color="green" />}
                         {voiceConv.isListening && <PulseRings color="green" />}
                         {voiceConv.isUserSpeaking && <PulseRings color="red" />}
                       </div>
@@ -1299,14 +1321,37 @@ export function VoiceSimulatorPage() {
                         </Button>
                       )}
 
+                      {/* Re-calibrate button when listening */}
+                      {voiceConv.isListening && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={voiceConv.recalibrate}
+                          className="gap-1.5 text-[10px] h-6 px-2 opacity-60 hover:opacity-100"
+                        >
+                          <Radio className="h-3 w-3" />
+                          Re-calibrate noise
+                        </Button>
+                      )}
+
                       {/* Status text */}
                       <p className="text-[11px] text-muted-foreground text-center">
+                        {voiceConv.isCalibrating && 'Measuring ambient noise... stay quiet'}
                         {voiceConv.isListening && 'Listening... Just speak naturally'}
                         {voiceConv.isUserSpeaking && 'Hearing you... pause when done'}
                         {voiceConv.isProcessing && (processingStage || 'Processing...')}
                         {voiceConv.isAgentSpeaking && 'Agent is responding... Click to interrupt'}
                         {voiceConv.isIdle && 'Microphone initializing...'}
                       </p>
+
+                      {/* Noise floor indicator (shown in listening states) */}
+                      {(voiceConv.isListening || voiceConv.isUserSpeaking || voiceConv.isCalibrating) && voiceConv.noiseFloor > 0 && (
+                        <div className="flex items-center gap-3 text-[10px] text-muted-foreground/70 font-mono">
+                          <span>Noise: {voiceConv.noiseFloor.toFixed(4)}</span>
+                          <span>Threshold: {voiceConv.dynamicThreshold.toFixed(4)}</span>
+                          <span>Level: {voiceConv.audioLevel.toFixed(4)}</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
