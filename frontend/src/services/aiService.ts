@@ -165,12 +165,14 @@ export const aiService = {
   },
 
   /** Transcribe audio to text */
-  transcribe: async (audioBlob: Blob, filename = 'recording.webm'): Promise<TranscribeResponse> => {
+  transcribe: async (audioBlob: Blob, filename = 'recording.webm', contextHint?: string): Promise<TranscribeResponse> => {
     const formData = new FormData();
     formData.append('audio', audioBlob, filename);
+    const params: Record<string, string> = { language: 'en' };
+    if (contextHint) params.context_hint = contextHint;
     const { data } = await aiApi.post<TranscribeResponse>('/voice/transcribe', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      params: { language: 'en' },
+      params,
     });
     return data;
   },

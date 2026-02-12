@@ -41,6 +41,8 @@ export interface VoiceConversationCallbacks {
   onCallActive: (active: boolean) => void;
   onError: (msg: string) => void;
   onProcessingStage?: (stage: string) => void;
+  /** Provide last agent message for Whisper context hinting */
+  getLastAgentMessage?: () => string | undefined;
 }
 
 export interface VoiceConversationConfig {
@@ -234,7 +236,9 @@ export function useVoiceConversation(
     setConvState('PROCESSING');
     callbacksRef.current.onProcessingStage?.('Transcribing...');
     try {
-      const transcription = await aiService.transcribe(blob);
+      // Pass last agent message as context hint to Whisper
+      const contextHint = callbacksRef.current.getLastAgentMessage?.();
+      const transcription = await aiService.transcribe(blob, 'recording.webm', contextHint);
       const userText = transcription.text?.trim();
       if (!userText) {
         console.log('[VoiceConv] Empty transcription → back to listening');

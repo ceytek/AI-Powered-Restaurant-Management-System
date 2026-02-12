@@ -10,9 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 # ── Whisper hallucination patterns ──
-# Exact matches (lowercased) that Whisper produces on silence/noise
+# Exact matches (lowercased, stripped of trailing period) that Whisper produces on silence/noise
 HALLUCINATION_EXACT = {
     "thank you",
+    "thanks",
     "thanks for watching",
     "subscribe",
     "like and subscribe",
@@ -52,6 +53,26 @@ HALLUCINATION_EXACT = {
     "the caller speaks english.",
     "english",
     "phone call",
+    "restaurant reservation phone call",
+    "restaurant reservation",
+    # Common Whisper silence hallucinations
+    "i'm going to go ahead and do that",
+    "i'll be right back",
+    "let me check",
+    "one moment please",
+    "have a good day",
+    "have a nice day",
+    "have a great day",
+    "take care",
+    "see you later",
+    "see you soon",
+    "that's it",
+    "that's all",
+    "the following",
+    "in this video",
+    "hello",
+    "hi",
+    "hey",
 }
 
 # Substring patterns – if the transcription contains any of these, it's likely a hallucination
@@ -73,6 +94,13 @@ HALLUCINATION_SUBSTRINGS = [
     "transcribed by",
     "copyright",
     "all rights reserved",
+    "the previous",
+    "restaurant reservation phone call",
+    "in this episode",
+    "in this video",
+    "don't forget to",
+    "hit the bell",
+    "notification",
 ]
 
 # Regex patterns for common Whisper noise artefacts
@@ -82,6 +110,9 @@ HALLUCINATION_REGEX = [
     re.compile(r"^[\s\W]*$"),                       # whitespace/symbols only
     re.compile(r"^this is [\w\s]+ bell\.?$", re.I), # "This is Matt Bell" etc
     re.compile(r"^my name is [\w\s]+\.?$", re.I),   # "My name is ..." artefact
+    # Multi-sentence farewells that Whisper hallucinates from noise
+    re.compile(r"^that'?s it for now[\.\!]?\s*(have a|bye|good)", re.I),
+    re.compile(r"^(have a (great|good|nice|wonderful) (day|one|evening)[\.\!]?\s*){1,2}$", re.I),
 ]
 
 
@@ -125,6 +156,7 @@ class VoiceService:
         audio_data: bytes,
         filename: str = "audio.webm",
         language: Optional[str] = None,
+        context_hint: Optional[str] = None,
     ) -> dict:
         """Transcribe audio using OpenAI Whisper.
 
@@ -132,6 +164,9 @@ class VoiceService:
             audio_data: Raw audio bytes
             filename: Original filename (helps Whisper detect format)
             language: Language code (defaults to 'en' to prevent wrong language detection)
+            context_hint: Optional conversation context to prime Whisper for better accuracy.
+                          E.g. last agent question like "What date were you thinking?"
+                          helps Whisper expect date-related words like "tomorrow", "Saturday", etc.
 
         Returns:
             dict with 'text' and 'language' keys
@@ -141,13 +176,18 @@ class VoiceService:
         # ALWAYS set language to prevent Whisper from detecting wrong languages.
         forced_language = language or self.DEFAULT_LANGUAGE
 
+        # Build a contextual prompt for Whisper.
+        # The prompt "primes" Whisper — it expects words/phrases similar to the prompt.
+        # By including conversation context, Whisper is more likely to hear "tomorrow"
+        # instead of hallucinating "That's it for now. Have a great day."
+        prompt = self._build_whisper_prompt(context_hint)
+
         kwargs = {
             "model": settings.OPENAI_WHISPER_MODEL,
             "file": file_tuple,
             "response_format": "json",
             "language": forced_language,
-            # Neutral prompt – avoid phrases Whisper may echo back
-            "prompt": "Restaurant reservation phone call.",
+            "prompt": prompt,
         }
 
         response = await self.client.audio.transcriptions.create(**kwargs)
@@ -165,6 +205,60 @@ class VoiceService:
             "text": transcribed_text,
             "language": forced_language,
         }
+
+    @staticmethod
+    def _build_whisper_prompt(context_hint: Optional[str] = None) -> str:
+        """Build a contextual prompt for Whisper to improve accuracy.
+
+        Whisper uses the prompt as a "prior" — it biases transcription towards
+        words and phrases that appear in the prompt. By including conversation
+        context (e.g. the last agent question), Whisper expects relevant answers.
+
+        Examples:
+          Agent asked "What date?"     → prompt includes "tomorrow, Saturday, next week, January..."
+          Agent asked "Your name?"     → prompt includes "My name is, spelled, letter by letter..."
+          Agent asked "How many guests?"→ prompt includes "two, three, four, five, party of..."
+        """
+        # Base prompt — always present
+        base = "Restaurant reservation phone call."
+
+        if not context_hint:
+            return base
+
+        ctx = context_hint.lower()
+
+        # Date-related context
+        if any(w in ctx for w in ["date", "when", "day", "which day", "what day"]):
+            return f"{base} The caller may say: today, tomorrow, tonight, this Saturday, next Friday, January, February, the 15th, next week."
+
+        # Time-related context
+        if any(w in ctx for w in ["time", "what time", "when", "o'clock"]):
+            return f"{base} The caller may say: seven PM, 7 o'clock, around 8, 6:30, half past seven, noon, evening."
+
+        # Name-related context
+        if any(w in ctx for w in ["name", "your name", "who", "may i have"]):
+            return f"{base} The caller is saying their name. They may spell it letter by letter: A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z."
+
+        # Party size context
+        if any(w in ctx for w in ["many", "guests", "party", "people", "how many"]):
+            return f"{base} The caller may say: two, three, four, five, six, seven, eight, party of, just us, couple."
+
+        # Phone number context
+        if any(w in ctx for w in ["phone", "number", "contact", "reach"]):
+            return f"{base} The caller is saying a phone number with digits: zero, one, two, three, four, five, six, seven, eight, nine, plus."
+
+        # Confirmation context
+        if any(w in ctx for w in ["confirm", "shall i", "go ahead", "book"]):
+            return f"{base} The caller may say: yes, yes please, that's correct, go ahead, sure, sounds good, perfect, no wait, actually, change."
+
+        # Reservation lookup context
+        if any(w in ctx for w in ["reservation number", "confirmation", "look up", "check", "cancel"]):
+            return f"{base} The caller may say a reservation number like RES-0001, or their name, or phone number."
+
+        # Generic — include the last agent message as context
+        # Truncate to avoid prompt being too long
+        truncated = context_hint[:120]
+        return f"{base} Previous: \"{truncated}\""
 
     async def synthesize(
         self,

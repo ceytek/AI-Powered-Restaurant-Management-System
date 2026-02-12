@@ -54,6 +54,7 @@ class VoiceChatResponse(BaseModel):
 async def transcribe_audio(
     audio: UploadFile = File(..., description="Audio file (webm, mp3, wav, m4a)"),
     language: str = Query("en", description="Language code (default: en)"),
+    context_hint: Optional[str] = Query(None, description="Conversation context hint for better Whisper accuracy"),
 ):
     """Transcribe audio to text using OpenAI Whisper."""
     if not settings.OPENAI_API_KEY:
@@ -70,6 +71,7 @@ async def transcribe_audio(
             audio_data=audio_data,
             filename=audio.filename or "audio.webm",
             language=language,
+            context_hint=context_hint,
         )
         duration_ms = int((time.time() - start) * 1000)
         return TranscribeResponse(

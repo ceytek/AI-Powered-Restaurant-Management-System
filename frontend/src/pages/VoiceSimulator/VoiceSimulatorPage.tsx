@@ -434,6 +434,13 @@ export function VoiceSimulatorPage() {
       },
       onError: (msg) => toast.error(msg),
       onProcessingStage: (stage) => setProcessingStage(stage),
+      getLastAgentMessage: () => {
+        // Find the last assistant message to provide context to Whisper
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'assistant') return messages[i].content;
+        }
+        return undefined;
+      },
     },
   );
 
