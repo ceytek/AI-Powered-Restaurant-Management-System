@@ -115,8 +115,9 @@ HALLUCINATION_REGEX = [
     # Multi-sentence farewells that Whisper hallucinates from noise
     re.compile(r"^that'?s it for now[\.\!]?\s*(have a|bye|good)", re.I),
     re.compile(r"^(have a (great|good|nice|wonderful) (day|one|evening)[\.\!]?\s*){1,2}$", re.I),
-    # Full alphabet recitation (Whisper echoing prompt)
-    re.compile(r"^[A-Z],?\s*[A-Z],?\s*[A-Z],?\s*[A-Z],?\s*[A-Z]", re.I),
+    # Full alphabet recitation — REQUIRE comma or space+comma between letters
+    # e.g. "A, B, C, D, E" but NOT "I want" (which has no separators)
+    re.compile(r"^[A-Z][,\s]{2,}[A-Z][,\s]{2,}[A-Z][,\s]{2,}[A-Z][,\s]{2,}[A-Z]", re.I),
 ]
 
 
