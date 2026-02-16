@@ -1,28 +1,18 @@
 /**
  * useVoiceConversation — Production-grade VAD + Turn-Taking
  *
- * STATES:
- *   IDLE           → Not in a call
- *   CALIBRATING    → Measuring ambient noise (~1.5s)
- *   LISTENING      → Mic live, waiting for speech
- *   USER_SPEAKING  → Detected speech, recording
- *   PROCESSING     → Speech ended, sending to backend
- *   AGENT_SPEAKING → Playing TTS response
+ * KEY INSIGHT for noisy environments (café, restaurant):
+ * In a café, other people talking also has speech-band energy,
+ * so band-ratio alone can't distinguish "user stopped" from "others talking".
  *
- * KEY VAD FEATURES:
- *   1. Adaptive noise floor (calibration + EMA)
- *   2. Hysteresis: onset threshold > offset threshold
- *   3. Onset hangover: sustained above-threshold before trigger
- *   4. Speech band energy ratio (300–3400 Hz) — rejects music/broadband noise
- *   5. High-pass filter at 100 Hz (bass/rumble rejection)
- *   6. *** RELATIVE ENERGY DROP *** — tracks user's speaking level,
- *      detects when energy drops >50% from their speaking average
- *      even if ambient noise keeps absolute RMS high.
- *   7. Adaptive silence duration — faster cutoff when clearly non-speech
- *   8. Max speech duration timeout — 15s safety valve
- *   9. Energy trend detection — falling energy = user stopped
- *  10. Peak RMS gating on final audio blob
- *  11. Manual "Done Speaking" button — immediate finalize
+ * SOLUTION: PEAK-BASED RELATIVE DROP
+ * - Track the PEAK RMS while user is speaking
+ * - When RMS drops below 50% of PEAK for 700ms → user stopped
+ * - Peak never decays → always represents the user's actual voice level
+ * - Works because user's voice is much louder than ambient (near-field mic)
+ *
+ * STATES:
+ *   IDLE → CALIBRATING → LISTENING → USER_SPEAKING → PROCESSING → AGENT_SPEAKING → LISTENING
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -44,7 +34,6 @@ export interface VoiceConversationCallbacks {
   onCallActive: (active: boolean) => void;
   onError: (msg: string) => void;
   onProcessingStage?: (stage: string) => void;
-  /** Provide last agent message for Whisper context hinting */
   getLastAgentMessage?: () => string | undefined;
 }
 
@@ -52,21 +41,15 @@ export interface VoiceConversationConfig {
   companyId: string;
   sessionId: string | null;
   ttsEnabled: boolean;
-  /** Absolute minimum speech threshold. Default 0.012 */
   speechThreshold?: number;
-  /** Max silence (ms) before ending speech segment. Default 2000 */
   silenceDurationMs?: number;
-  /** Minimum speech length to send (ms). Default 500 */
   minSpeechMs?: number;
-  /** Multiplier for onset threshold. Default 3.5 */
   noiseMultiplierOnset?: number;
-  /** Multiplier for offset threshold (lower = stickier). Default 2.0 */
   noiseMultiplierOffset?: number;
 }
 
 /* ───────── Audio Helpers ───────── */
 
-/** RMS from time-domain data */
 function calcRMS(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
   analyser.getByteTimeDomainData(buf);
   let sum = 0;
@@ -77,11 +60,6 @@ function calcRMS(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>): number {
   return Math.sqrt(sum / buf.length);
 }
 
-/**
- * Speech Band Energy Ratio: energy in 300–3400 Hz / total.
- * Human speech is concentrated here; music/noise is broader.
- * Returns 0..1 (higher = more speech-like).
- */
 function calcSpeechBandRatio(analyser: AnalyserNode, freqBuf: Uint8Array<ArrayBuffer>, sampleRate: number): number {
   analyser.getByteFrequencyData(freqBuf);
   const binCount = analyser.frequencyBinCount;
@@ -100,19 +78,21 @@ function calcSpeechBandRatio(analyser: AnalyserNode, freqBuf: Uint8Array<ArrayBu
 }
 
 /* ────── Tuning Constants ────── */
-const CALIBRATION_MS           = 1500;    // Calibration window
-const NOISE_EMA_ALPHA          = 0.012;   // Slow noise floor adaptation
-const ONSET_HANGOVER_MS        = 250;     // Must sustain above onset threshold
-const SPEECH_BAND_MIN_ONSET    = 0.28;    // Band ratio minimum for onset (stricter)
-const SPEECH_BAND_MIN_OFFSET   = 0.20;    // Band ratio minimum for offset (looser)
-const HIGH_PASS_FREQ           = 100;     // Hz cutoff
-const MAX_SPEECH_DURATION_MS   = 15000;   // 15s safety cap
-const ENERGY_TREND_WINDOW      = 10;      // Frames to track for energy trend
+const CALIBRATION_MS         = 1500;
+const NOISE_EMA_ALPHA        = 0.012;
+const ONSET_HANGOVER_MS      = 250;
+const SPEECH_BAND_MIN_ONSET  = 0.28;
+const HIGH_PASS_FREQ         = 100;
+const MAX_SPEECH_DURATION_MS = 15000;
 
-// ★ Relative energy drop detection
-const SPEECH_ENERGY_EMA        = 0.15;    // How fast we track user's speech energy
-const RELATIVE_DROP_FACTOR     = 0.45;    // If current < 45% of speech avg → "dropped"
-const RELATIVE_DROP_SILENCE_MS = 600;     // After drop, wait this long then finalize
+// ★★★ PEAK-BASED DROP DETECTION (the key mechanism) ★★★
+// If current RMS drops below PEAK_DROP_RATIO of the user's peak → "dropped"
+const PEAK_DROP_RATIO        = 0.50;   // <50% of peak = user stopped
+const PEAK_DROP_CONFIRM_MS   = 700;    // Must sustain 700ms to confirm
+const PEAK_RECOVERY_RATIO    = 0.65;   // Must rise back to 65% of peak to cancel drop
+
+// Absolute silence fallback (in case peak detection doesn't trigger)
+const ABSOLUTE_SILENCE_MS    = 1500;   // Hard timeout: no speech-like signal for 1.5s
 
 /* ════════════════ HOOK ════════════════ */
 export function useVoiceConversation(
@@ -124,7 +104,7 @@ export function useVoiceConversation(
     sessionId,
     ttsEnabled,
     speechThreshold = 0.012,
-    silenceDurationMs = 2000,
+    silenceDurationMs = 1500,
     minSpeechMs = 500,
     noiseMultiplierOnset = 3.5,
     noiseMultiplierOffset = 2.0,
@@ -167,12 +147,8 @@ export function useVoiceConversation(
   /* ── Refs: Onset hangover ── */
   const onsetAccumRef = useRef<number>(0);
 
-  /* ── Refs: Energy trend (detect falling energy) ── */
-  const energyHistoryRef = useRef<number[]>([]);
-
-  /* ── ★ Refs: Relative energy drop ── */
-  const speechEnergyAvgRef = useRef<number>(0);   // EMA of user's speaking RMS
-  const energyDropTimeRef = useRef<number>(0);     // When we first detected the drop
+  /* ── ★ Refs: Peak-based drop detection ── */
+  const dropStartTimeRef = useRef<number>(0);  // When drop was first detected (0 = not in drop)
 
   /* ── Keep in sync ── */
   const callbacksRef = useRef(callbacks);
@@ -194,7 +170,6 @@ export function useVoiceConversation(
     }
   }, []);
 
-  /** Update noise floor → recompute both thresholds */
   const updateThresholds = useCallback((nf: number) => {
     const onset = Math.max(nf * noiseMultiplierOnset, speechThreshold);
     const offset = Math.max(nf * noiseMultiplierOffset, speechThreshold * 0.75);
@@ -247,7 +222,6 @@ export function useVoiceConversation(
     setConvState('PROCESSING');
     callbacksRef.current.onProcessingStage?.('Transcribing...');
     try {
-      // Pass last agent message as context hint to Whisper
       const contextHint = callbacksRef.current.getLastAgentMessage?.();
       const transcription = await aiService.transcribe(blob, 'recording.webm', contextHint);
       const userText = transcription.text?.trim();
@@ -315,7 +289,6 @@ export function useVoiceConversation(
     if (!analyser || !timeBuf || !freqBuf) return;
 
     lastFrameTimeRef.current = Date.now();
-    energyHistoryRef.current = [];
 
     const loop = () => {
       vadFrameRef.current = requestAnimationFrame(loop);
@@ -347,15 +320,12 @@ export function useVoiceConversation(
           const p75 = sorted[Math.floor(sorted.length * 0.75)] || 0;
           console.log(
             `[VAD] Calibrated: samples=${sorted.length}, noise=${p75.toFixed(4)}, ` +
-            `onset=${Math.max(p75 * noiseMultiplierOnset, speechThreshold).toFixed(4)}, ` +
-            `offset=${Math.max(p75 * noiseMultiplierOffset, speechThreshold * 0.75).toFixed(4)}`,
+            `onset=${Math.max(p75 * noiseMultiplierOnset, speechThreshold).toFixed(4)}`,
           );
           updateThresholds(p75);
           calibratedRef.current = true;
           onsetAccumRef.current = 0;
-          energyHistoryRef.current = [];
-          speechEnergyAvgRef.current = 0;
-          energyDropTimeRef.current = 0;
+          dropStartTimeRef.current = 0;
           setConvState('LISTENING');
           callbacksRef.current.onProcessingStage?.('');
         }
@@ -367,7 +337,7 @@ export function useVoiceConversation(
 
       /* ════ LISTENING ════ */
       if (currentState === 'LISTENING') {
-        // Adapt noise floor slowly (only during non-speech)
+        // Adapt noise floor slowly
         if (rms <= offsetTh) {
           const nf = noiseFloorRef.current;
           const newNf = nf * (1 - NOISE_EMA_ALPHA) + rms * NOISE_EMA_ALPHA;
@@ -375,20 +345,17 @@ export function useVoiceConversation(
           onsetAccumRef.current = 0;
         }
 
-        // Onset detection: RMS > onset AND speech band check AND hangover
+        // Onset: RMS > onset AND speech band AND hangover
         const rmsAboveOnset = rms > onsetTh;
         const speechLikely = bandRatio >= SPEECH_BAND_MIN_ONSET;
 
         if (rmsAboveOnset && speechLikely) {
           onsetAccumRef.current += dt;
           if (onsetAccumRef.current >= ONSET_HANGOVER_MS) {
-            // ✅ Confirmed speech → start recording
             speechStartTimeRef.current = now;
             lastSpeechTimeRef.current = now;
             peakRmsRef.current = rms;
-            energyHistoryRef.current = [rms];
-            speechEnergyAvgRef.current = rms;  // ★ Initialize speech energy tracker
-            energyDropTimeRef.current = 0;      // ★ Reset drop timer
+            dropStartTimeRef.current = 0;
             setConvState('USER_SPEAKING');
 
             const stream = streamRef.current;
@@ -426,7 +393,6 @@ export function useVoiceConversation(
             }
           }
         } else {
-          // Decay onset accumulator (2× faster than build-up)
           if (onsetAccumRef.current > 0) {
             onsetAccumRef.current = Math.max(0, onsetAccumRef.current - dt * 2);
           }
@@ -434,97 +400,65 @@ export function useVoiceConversation(
 
       /* ════ USER_SPEAKING ════ */
       } else if (currentState === 'USER_SPEAKING') {
-        // Track energy trend
-        const hist = energyHistoryRef.current;
-        hist.push(rms);
-        if (hist.length > ENERGY_TREND_WINDOW) hist.shift();
-
-        if (rms > peakRmsRef.current) peakRmsRef.current = rms;
-
-        // ★ RELATIVE ENERGY DROP DETECTION
-        // Track the user's average speaking energy with EMA.
-        // When energy drops to <45% of their speech average, they likely stopped.
-        const speechAvg = speechEnergyAvgRef.current;
-
-        // Only update speech average when RMS is high (user is actually speaking)
-        const rmsAboveOffset = rms > offsetTh;
-        const bandIsSpeechLike = bandRatio >= SPEECH_BAND_MIN_OFFSET;
-        const stillSpeaking = rmsAboveOffset && bandIsSpeechLike;
-
-        if (stillSpeaking) {
-          // Update speech energy average (only when user is clearly speaking)
-          speechEnergyAvgRef.current = speechAvg * (1 - SPEECH_ENERGY_EMA) + rms * SPEECH_ENERGY_EMA;
-          lastSpeechTimeRef.current = now;
-          energyDropTimeRef.current = 0; // Reset drop timer
+        // Track peak RMS (only goes up, never down)
+        if (rms > peakRmsRef.current) {
+          peakRmsRef.current = rms;
         }
 
-        const silenceMs = now - lastSpeechTimeRef.current;
+        const peak = peakRmsRef.current;
+        const dropThreshold = peak * PEAK_DROP_RATIO;
+        const recoveryThreshold = peak * PEAK_RECOVERY_RATIO;
 
-        // ★★★ RELATIVE DROP CHECK ★★★
-        // If energy has dropped to < 45% of user's speaking average,
-        // they likely stopped — even if café noise keeps absolute RMS above offset.
-        const relativelyDropped = speechAvg > 0 && rms < speechAvg * RELATIVE_DROP_FACTOR;
+        // ★★★ PEAK-BASED DROP DETECTION ★★★
+        // If current RMS < 50% of user's PEAK speaking level → they likely stopped.
+        // Peak is fixed (only goes up) so café ambient can't drag it down.
+        // User speaks at 0.08 peak → stops → café at 0.03 < 0.04 (50% of 0.08) → DROP
+        const dropped = rms < dropThreshold;
 
-        if (relativelyDropped) {
-          if (energyDropTimeRef.current === 0) {
-            energyDropTimeRef.current = now;
+        if (dropped) {
+          // Start or continue drop timer
+          if (dropStartTimeRef.current === 0) {
+            dropStartTimeRef.current = now;
             console.log(
-              `[VAD] ★ Energy drop detected: rms=${rms.toFixed(4)} < ${(speechAvg * RELATIVE_DROP_FACTOR).toFixed(4)} ` +
-              `(${(RELATIVE_DROP_FACTOR * 100).toFixed(0)}% of avg=${speechAvg.toFixed(4)})`,
+              `[VAD] ★ Peak drop: rms=${rms.toFixed(4)} < ${dropThreshold.toFixed(4)} ` +
+              `(50% of peak=${peak.toFixed(4)})`,
             );
           }
-          const dropDuration = now - energyDropTimeRef.current;
-          if (dropDuration >= RELATIVE_DROP_SILENCE_MS) {
-            console.log(`[VAD] ★ Relative energy drop sustained ${dropDuration}ms → end speech`);
+          const dropDuration = now - dropStartTimeRef.current;
+          if (dropDuration >= PEAK_DROP_CONFIRM_MS) {
+            console.log(`[VAD] ★ Peak drop confirmed after ${dropDuration}ms → END SPEECH`);
             finalizeRecording();
             return;
           }
-        } else {
-          // Energy came back up — reset drop timer
-          if (energyDropTimeRef.current > 0 && stillSpeaking) {
-            energyDropTimeRef.current = 0;
+        } else if (rms >= recoveryThreshold) {
+          // Energy recovered to near peak → user is speaking again
+          if (dropStartTimeRef.current > 0) {
+            console.log(`[VAD] Drop cancelled: rms=${rms.toFixed(4)} recovered to >${recoveryThreshold.toFixed(4)}`);
           }
+          dropStartTimeRef.current = 0;
+          lastSpeechTimeRef.current = now;
         }
+        // In between (50%..65% of peak): don't update either timer
+        // This prevents brief café noise spikes from resetting the drop
 
-        // Adaptive silence duration based on band ratio
-        let effectiveSilenceDuration = silenceDurationMs;
-        if (bandRatio < 0.15) {
-          // Clearly non-speech (music/broadband) → cut silence wait
-          effectiveSilenceDuration = silenceDurationMs * 0.4;
-        } else if (bandRatio < SPEECH_BAND_MIN_OFFSET) {
-          effectiveSilenceDuration = silenceDurationMs * 0.65;
+        // ─── ABSOLUTE SILENCE FALLBACK ───
+        // If nothing speech-like for ABSOLUTE_SILENCE_MS (regardless of peak)
+        const offsetAbove = rms > offsetTh;
+        const speechBand = bandRatio >= 0.20;
+        if (offsetAbove && speechBand) {
+          lastSpeechTimeRef.current = now;
         }
-
-        // Energy trend: if energy has been declining steadily, user likely stopped
-        let energyFalling = false;
-        if (hist.length >= ENERGY_TREND_WINDOW) {
-          const firstHalf = hist.slice(0, Math.floor(hist.length / 2));
-          const secondHalf = hist.slice(Math.floor(hist.length / 2));
-          const avg1 = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
-          const avg2 = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
-          if (avg2 < avg1 * 0.55 && avg2 < offsetTh * 1.2) {
-            energyFalling = true;
-          }
-        }
-
-        // If energy is falling AND some silence accumulated → end speech
-        if (energyFalling && silenceMs >= effectiveSilenceDuration * 0.5) {
-          console.log(`[VAD] Energy falling + partial silence → end speech (${silenceMs}ms)`);
+        const absoluteSilence = now - lastSpeechTimeRef.current;
+        if (absoluteSilence >= ABSOLUTE_SILENCE_MS) {
+          console.log(`[VAD] Absolute silence ${absoluteSilence}ms → END SPEECH`);
           finalizeRecording();
-        }
-        // Standard silence check
-        else if (silenceMs >= effectiveSilenceDuration) {
-          console.log(
-            `[VAD] Silence ${silenceMs}ms >= ${effectiveSilenceDuration.toFixed(0)}ms → end speech ` +
-            `(band=${bandRatio.toFixed(3)}, rms=${rms.toFixed(4)})`,
-          );
-          finalizeRecording();
+          return;
         }
 
-        // Max speech duration safety valve
+        // ─── MAX DURATION SAFETY VALVE ───
         const speechDur = now - speechStartTimeRef.current;
         if (speechDur > MAX_SPEECH_DURATION_MS) {
-          console.log(`[VAD] Max speech duration ${MAX_SPEECH_DURATION_MS}ms exceeded → force end`);
+          console.log(`[VAD] Max speech ${MAX_SPEECH_DURATION_MS}ms → force END`);
           finalizeRecording();
         }
       }
@@ -553,18 +487,15 @@ export function useVoiceConversation(
       audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
 
-      // High-pass filter: cut bass/rumble (100 Hz)
       const highPass = audioCtx.createBiquadFilter();
       highPass.type = 'highpass';
       highPass.frequency.value = HIGH_PASS_FREQ;
       highPass.Q.value = 0.7;
 
-      // Analyser
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.3;
 
-      // Chain: source → highPass → analyser
       source.connect(highPass);
       highPass.connect(analyser);
 
@@ -610,9 +541,7 @@ export function useVoiceConversation(
     analyserRef.current = null;
     calibratedRef.current = false;
     onsetAccumRef.current = 0;
-    energyHistoryRef.current = [];
-    speechEnergyAvgRef.current = 0;
-    energyDropTimeRef.current = 0;
+    dropStartTimeRef.current = 0;
     setConvState('IDLE');
     setAudioLevel(0);
   }, [setConvState, stopTTS]);
@@ -624,9 +553,7 @@ export function useVoiceConversation(
       calibrationStartRef.current = Date.now();
       calibratedRef.current = false;
       onsetAccumRef.current = 0;
-      energyHistoryRef.current = [];
-      speechEnergyAvgRef.current = 0;
-      energyDropTimeRef.current = 0;
+      dropStartTimeRef.current = 0;
       setConvState('CALIBRATING');
       callbacksRef.current.onProcessingStage?.('Re-calibrating...');
     }
