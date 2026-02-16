@@ -396,8 +396,8 @@ export function VoiceSimulatorPage() {
       speechThreshold,
       silenceDurationMs: silenceDuration,
       minSpeechMs: 500,
-      noiseMultiplierOnset: 3.0,
-      noiseMultiplierOffset: 1.8,
+      noiseMultiplierOnset: 3.5,
+      noiseMultiplierOffset: 2.0,
     },
     {
       onSessionId: (id) => setSessionId(id),
@@ -1317,6 +1317,19 @@ export function VoiceSimulatorPage() {
                         {voiceConv.isUserSpeaking && <PulseRings color="red" />}
                       </div>
 
+                      {/* ★ "Done Speaking" button when user is speaking */}
+                      {voiceConv.isUserSpeaking && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={voiceConv.finishSpeaking}
+                          className="gap-1.5 text-xs animate-in fade-in duration-200 bg-rose-600 hover:bg-rose-700 text-white shadow-lg"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                          Done Speaking
+                        </Button>
+                      )}
+
                       {/* Barge-in button when agent is speaking */}
                       {voiceConv.isAgentSpeaking && (
                         <Button
@@ -1347,7 +1360,7 @@ export function VoiceSimulatorPage() {
                       <p className="text-[11px] text-muted-foreground text-center">
                         {voiceConv.isCalibrating && 'Measuring ambient noise... stay quiet'}
                         {voiceConv.isListening && 'Listening... Just speak naturally'}
-                        {voiceConv.isUserSpeaking && 'Hearing you... pause when done'}
+                        {voiceConv.isUserSpeaking && 'Hearing you... click "Done Speaking" when finished'}
                         {voiceConv.isProcessing && (processingStage || 'Processing...')}
                         {voiceConv.isAgentSpeaking && 'Agent is responding... Click to interrupt'}
                         {voiceConv.isIdle && 'Microphone initializing...'}
